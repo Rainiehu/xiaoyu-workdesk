@@ -4,21 +4,47 @@ import SwiftUI
 /// 今天锚在中间、上方是过去、下方是未来，打开时就滚到今天。
 ///
 /// 分组由 `Store.timeline(today:)` 给出，这里不自己聚合。
-/// 这一版只读 —— 不在这儿新建待办，也不拖拽改期。
+///
+/// 顶上是记事输入区：这里是打开主线默认落地的地方，也是最常问「接下来要做什么」的地方，
+/// 所以它必须能直接记录，不该逼使用者先切到某个分类。在这儿记下的待办自动排在今天，
+/// 于是它立刻出现在眼前这条轴上，而不是凭空消失到某个分类里去。
+/// 拖拽改期仍不在这张视图里，那是后续的事。
 ///
 /// 计划日在过去而未完成的待办与别的待办写法一模一样：不置顶、不变色、不加徽标、不自动顺延。
 /// 「过期」这个概念不存在，见 ADR-0001。要给它加提醒之前请先读那份 ADR。
 struct HourglassView: View {
     @Environment(Store.self) private var store
 
+    @State private var draft = ""
+    @FocusState private var inputFocused: Bool
+
+    /// 轴与输入区共同的内容宽度上限与内缩。写在一处，两者因此左右对齐 ——
+    /// 输入框看着就是这条轴的开头，不是浮在它上面的另一块东西。
+    private let contentWidth: CGFloat = 640
+    private let contentInset: CGFloat = 28
+
     var body: some View {
         // 「今天」每次渲染问一次，整条轴都跟着这一个值：锚点、强调、日期写法因此永远一致，
         // 而跨过零点之后的下一次渲染会自己跟上，不像存进 @State 那样一直停在昨天。
         let today = Date.now
 
-        // 只有排了期的日子在轴上，条数不多，所以用 VStack 而不是 LazyVStack ——
-        // 打开时要滚到今天，那一组必须已经在布局里。
-        return ScrollViewReader { proxy in
+        return VStack(spacing: 0) {
+            // 输入区在 ScrollView 外面：轴滚到哪儿它都在顶上，记事随时都在手边。
+            if let category = store.recordingCategory {
+                input(category: category, today: today)
+                    .padding(.horizontal, contentInset)
+                    .padding(.top, contentInset)
+                    .frame(maxWidth: contentWidth)
+                    .frame(maxWidth: .infinity)
+            }
+            timeline(today: today)
+        }
+    }
+
+    /// 只有排了期的日子在轴上，条数不多，所以用 VStack 而不是 LazyVStack ——
+    /// 打开时要滚到今天，那一组必须已经在布局里。
+    private func timeline(today: Date) -> some View {
+        ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(store.timeline(today: today)) { day in
@@ -26,9 +52,9 @@ struct HourglassView: View {
                             .id(day.day)
                     }
                 }
-                .padding(.horizontal, 28)
+                .padding(.horizontal, contentInset)
                 .padding(.vertical, 24)
-                .frame(maxWidth: 640, alignment: .leading)
+                .frame(maxWidth: contentWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
             .onAppear {
@@ -36,6 +62,67 @@ struct HourglassView: View {
                 proxy.scrollTo(today.dayStart, anchor: .center)
             }
         }
+    }
+
+    /// 记事的那一条：输入框，旁边是记到哪个分类。
+    private func input(category: Category, today: Date) -> some View {
+        TodoInputField(
+            tint: category.color.tint,
+            prompt: "记一件事，回车记在今天…",
+            text: $draft,
+            focused: $inputFocused,
+            submit: { record(today: today) }
+        ) {
+            RecordingCategoryPicker(current: category)
+        }
+    }
+
+    /// 记下草稿里的那件事。归到哪个分类、排在哪一天都由 `Store` 定，空白输入也由它挡掉；
+    /// 这里只管清空并留住焦点，好让记事可以一条接一条。
+    private func record(today: Date) {
+        store.recordOnTimeline(draft, today: today)
+        draft = ""
+        inputFocused = true
+    }
+}
+
+/// 记到哪个分类。列出全部分类，选中的那个由 `Store` 记着 —— 它跨重启保留，
+/// 于是连续记同一类事情不用反复选。样子取自沙漏视图里的分类 tag，
+/// 「这条会记成什么颜色」因此一眼就对得上。
+private struct RecordingCategoryPicker: View {
+    @Environment(Store.self) private var store
+    let current: Category
+
+    var body: some View {
+        Menu {
+            ForEach(store.categories) { category in
+                Button {
+                    store.chooseRecordingCategory(category.id)
+                } label: {
+                    // 当前那个前面带勾：菜单收起来时只看得见名字，展开才说得清哪个是选中的。
+                    if category.id == current.id {
+                        Label(category.name, systemImage: "checkmark")
+                    } else {
+                        Text(category.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(current.name)
+                    .font(.caption)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .categoryChip(current.color.tint)
+        }
+        // 按钮式菜单加无样式按钮：自定义的那身胶囊才画得出来 ——
+        // 无边框菜单会把 label 压成一行纯文字，颜色和底色都留不住。
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("记到哪个分类")
     }
 }
 
@@ -96,7 +183,8 @@ private struct TimelineRow: View {
     var body: some View {
         HStack(spacing: 10) {
             // 只给已完成的画勾，未完成的这里留空 —— 一个空心圆圈看着就像能点，
-            // 而这张视图只读，打勾和改期都在分类视图里做。位置留着，好让各行的正文对齐。
+            // 而打勾和改期都在分类视图里做，轴上只看得见事情排在哪天。
+            // 位置留着，好让各行的正文对齐。
             Image(systemName: "checkmark")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -133,10 +221,18 @@ struct CategoryTag: View {
     var body: some View {
         Text(category.name)
             .font(.caption)
-            .foregroundStyle(category.color.tint)
+            .categoryChip(category.color.tint)
+    }
+}
+
+extension View {
+    /// 分类的彩色胶囊。轴上每条待办旁的 tag 与记事的分类选择器共用这一副样子 ——
+    /// 「这条会记成什么颜色」于是与轴上已有的 tag 一眼对得上，不会各自漂移。
+    fileprivate func categoryChip(_ tint: Color) -> some View {
+        foregroundStyle(tint)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .background(Capsule().fill(category.color.tint.chipFill))
-            .overlay(Capsule().stroke(category.color.tint.chipStroke, lineWidth: 1))
+            .background(Capsule().fill(tint.chipFill))
+            .overlay(Capsule().stroke(tint.chipStroke, lineWidth: 1))
     }
 }
