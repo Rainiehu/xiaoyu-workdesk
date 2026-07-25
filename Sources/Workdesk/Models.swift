@@ -26,6 +26,9 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var createdAt: Date = .now
     /// 完成时刻。同样带着时刻落盘，显示时才截到天。没完成就没有完成日。
     var completedAt: Date?
+    /// 安排去做的那一天。可空 —— 「总得做但不急」的事可以永远不排期。
+    /// 与创建日、完成日各自独立存储，谁都不会覆盖谁。
+    var plannedOn: Date?
 }
 
 struct FavoriteItem: Identifiable, Codable, Equatable {
@@ -47,6 +50,39 @@ struct FavoriteItem: Identifiable, Codable, Equatable {
 
 extension Date {
     var dayStart: Date { Calendar.current.startOfDay(for: self) }
+
+    /// 是不是同一天。底下存的是全时刻，所以「同一天」永远要问 `Calendar`，不能拿 `==` 比时刻。
+    func isSameDay(as other: Date) -> Bool {
+        Calendar.current.isDate(self, inSameDayAs: other)
+    }
+
+    /// 界面上写这个日子的写法。截到天是显示层的事 —— 这里是唯一做这件截断的地方，
+    /// 底下的时刻原样留在数据里。收藏流的时间戳不走这条路，它显示带时刻。
+    var dayLabel: String { dayLabel(relativeTo: .now) }
+
+    /// - Parameter today: 「今天」是哪天。取出来当参数，好让这套写法可测且不随时钟漂移。
+    func dayLabel(relativeTo today: Date) -> String {
+        if isSameDay(as: today) { return "今天" }
+        let calendar = Calendar.current
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: today), isSameDay(as: tomorrow) {
+            return "明天"
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: today), isSameDay(as: yesterday) {
+            return "昨天"
+        }
+        let sameYear = calendar.component(.year, from: self) == calendar.component(.year, from: today)
+        return (sameYear ? Self.dayFormatter : Self.dayWithYearFormatter).string(from: self)
+    }
+
+    private static let dayFormatter = dateFormatter("M月d日")
+    private static let dayWithYearFormatter = dateFormatter("yyyy年M月d日")
+
+    private static func dateFormatter(_ format: String) -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = format
+        return f
+    }
 }
 
 extension Int {
