@@ -31,6 +31,16 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var plannedOn: Date?
 }
 
+/// 沙漏视图里的一天：一个计划日，和被安排在这天的待办。
+/// 只是 `Store` 分好的一份结果，不带任何行为 —— 聚合在 `Store` 里做，视图层照着铺就是。
+struct TimelineDay: Identifiable, Equatable {
+    /// 这一天的零点。按天分组的键，也是它的身份。
+    var day: Date
+    var todos: [TodoItem]
+
+    var id: Date { day }
+}
+
 struct FavoriteItem: Identifiable, Codable, Equatable {
     var id = UUID()
     var title: String

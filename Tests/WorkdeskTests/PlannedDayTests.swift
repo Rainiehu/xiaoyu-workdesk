@@ -6,11 +6,6 @@ import Testing
 @MainActor
 @Suite("计划日")
 struct PlannedDayTests {
-    /// 一个确定的日子，好让断言不随「今天是几号」漂移。
-    private func day(_ year: Int, _ month: Int, _ day: Int) throws -> Date {
-        try #require(Calendar.current.date(from: DateComponents(year: year, month: month, day: day)))
-    }
-
     @Test("新记下的待办是未排期的，排上计划日后它就有了")
     func schedulingAnUnscheduledTodo() throws {
         try withTemporaryDirectory { dir in
