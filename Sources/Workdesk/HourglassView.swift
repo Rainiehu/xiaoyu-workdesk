@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 沙漏视图：横跨所有分类的一条连续时间轴。排了计划日的待办按计划日铺成这条轴，
 /// 今天锚在中间、上方是过去、下方是未来，打开时就滚到今天。
@@ -8,7 +9,8 @@ import SwiftUI
 /// 顶上是记事输入区：这里是打开主线默认落地的地方，也是最常问「接下来要做什么」的地方，
 /// 所以它必须能直接记录，不该逼使用者先切到某个分类。在这儿记下的待办自动排在今天，
 /// 于是它立刻出现在眼前这条轴上，而不是凭空消失到某个分类里去。
-/// 拖拽改期仍不在这张视图里，那是后续的事。
+/// 轴上的条目可以直接拖到别的日期分组里去改期：调整安排是一个手势，不必点开日期面板。
+/// 拖拽只发生在这条轴的日期分组之间，也只改计划日 —— 归属哪个分类是横轴上的事，不因这一拖而变。
 ///
 /// 计划日在过去而未完成的待办与别的待办写法一模一样：不置顶、不变色、不加徽标、不自动顺延。
 /// 「过期」这个概念不存在，见 ADR-0001。要给它加提醒之前请先读那份 ADR。
@@ -128,9 +130,15 @@ private struct RecordingCategoryPicker: View {
 
 /// 轴上的一天：一个日期头，下面是这天的待办。
 /// 今天这一组用强调样式，它是锚点；别的日子一律同一副模样。
+///
+/// 每一组同时是一个落点：条目拖到这儿松手，它的计划日就是这一天。
 private struct DayGroup: View {
+    @Environment(Store.self) private var store
     let day: TimelineDay
     let today: Date
+
+    /// 有条目正悬在这一组上方。落点指示只认它 —— 松手落在哪一组，此刻亮的就是哪一组。
+    @State private var targeted = false
 
     private var isToday: Bool { day.day.isSameDay(as: today) }
 
@@ -156,6 +164,20 @@ private struct DayGroup: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(isToday ? AnyShapeStyle(.teal.opacity(0.08)) : AnyShapeStyle(.clear))
         )
+        // 落点指示画在外圈：整组连同日期头一起框起来，「松手会落在这一天」于是说得明明白白，
+        // 而底色留给今天那个锚点 —— 两件事各说各的，不会看混。
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2)
+        )
+        // 整块矩形都接得住，包括内缩留出的空白和只有一句话的今天 —— 落点不该只有文字那么窄。
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .dropDestination(for: DraggedTodo.self) { dropped, _ in
+            // 一次拖一条 —— 轴上没有多选，落下的就只会是刚才抓起的那一行。
+            guard let dropped = dropped.first else { return false }
+            return store.reschedule(dropped.id, to: day.day)
+        } isTargeted: { targeted = $0 }
+        .animation(.easeOut(duration: 0.12), value: targeted)
     }
 
     private var header: some View {
@@ -174,7 +196,27 @@ private struct DayGroup: View {
     }
 }
 
+/// 拖拽时在两个日期分组之间递过去的东西：一条待办的身份，仅此而已。
+/// 只带 id 不带整条待办 —— 落下时按 id 现找现改，途中它被打了勾或被删了，也不会有旧副本被写回去。
+///
+/// 类型是自家的，于是从别处拖来的文字、链接一律不被当成改期；反过来，
+/// 从轴上拖出去的东西别的应用也接不住 —— 这个手势只在这条轴里成立。
+private struct DraggedTodo: Codable, Transferable {
+    var id: TodoItem.ID
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .workdeskTodo)
+    }
+}
+
+extension UTType {
+    /// 只有沙漏视图自己拖出来的条目认得这个类型。与 `build.sh` 里 Info.plist 的
+    /// `UTExportedTypeDeclarations` 是同一个标识符，两边要一起改。
+    fileprivate static let workdeskTodo = UTType(exportedAs: "cc.huxiaoyu.workdesk.todo")
+}
+
 /// 轴上的一行待办：正文、所属分类的彩色 tag，已完成的再画个勾并附一句实际完成日。
+/// 整行可以拖到别的日期分组里去改期。
 private struct TimelineRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
@@ -211,6 +253,10 @@ private struct TimelineRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        // 整行都拖得动，包括已完成的那些 —— 做完的事也照样可以改它排在哪天。
+        // 内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
+        .contentShape(Rectangle())
+        .draggable(DraggedTodo(id: todo.id))
     }
 }
 

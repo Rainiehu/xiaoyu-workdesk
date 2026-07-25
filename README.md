@@ -5,7 +5,7 @@
 ## 功能
 
 - **主线** — 待办按自建的分类组织，分类以顶部 tab 呈现，新建只需输入名字、颜色自动分配；点进一个分类就看到左右两列，左边待完成、右边已完成，敲字回车记事，打勾完成、悬停删除
-- **沙漏视图** — 横跨所有分类的时间轴，按计划日铺开，今天锚在中间，上方是过去、下方是未来；顶上就能记事，旁边的分类选择器记着上次的选择，记下的待办自动排在今天
+- **沙漏视图** — 横跨所有分类的时间轴，按计划日铺开，今天锚在中间，上方是过去、下方是未来；顶上就能记事，旁边的分类选择器记着上次的选择，记下的待办自动排在今天；条目拖到另一个日期分组就改了期，落点当场框出来
 - **收藏流** — 粘贴链接或文字即收藏，链接卡片带域名标签、点击直达
 - **AI 用量** — 侧边栏底部小卡片，扫描本机 Claude Code / Codex 会话日志，展示今日 token 用量与周额度占比
 
@@ -44,7 +44,7 @@ Sources/Workdesk/
   Store.swift             状态与持久化
   MainlineView.swift      主线：分类 tab 栏、新建分类、引导空态
   CategoryTodoList.swift  分类视图：记事输入框，待完成/已完成两列
-  HourglassView.swift     沙漏视图：顶部记事输入区，按计划日铺开的时间轴
+  HourglassView.swift     沙漏视图：顶部记事输入区，按计划日铺开的时间轴，拖拽改期
   TodoInputField.swift    记事输入框，两个视图共用
   PlannedDayControl.swift 一条待办的排期入口与计划日面板
   FavoritesView.swift     收藏流
@@ -58,6 +58,7 @@ Tests/WorkdeskTests/
   CategoryColumnsTests.swift 分类视图两列的拼接与三套排序
   TimelineTests.swift        沙漏视图的按日分组
   HourglassRecordingTests.swift 沙漏视图记事：归属分类、计划日与记住的选择
+  TimelineDragTests.swift    沙漏视图里拖着条目改期
   DayLabelTests.swift        日期在界面上的写法
   TestSupport.swift          临时目录等测试夹具
 ```
