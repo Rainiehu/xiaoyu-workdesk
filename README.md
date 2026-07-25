@@ -4,7 +4,7 @@
 
 ## 功能
 
-- **主线** — 待办按自建的分类组织，分类以顶部 tab 呈现，新建只需输入名字、颜色自动分配
+- **主线** — 待办按自建的分类组织，分类以顶部 tab 呈现，新建只需输入名字、颜色自动分配；点进一个分类就看到它的待办，敲字回车记事，打勾完成、悬停删除
 - **收藏流** — 粘贴链接或文字即收藏，链接卡片带域名标签、点击直达
 - **AI 用量** — 侧边栏底部小卡片，扫描本机 Claude Code / Codex 会话日志，展示今日 token 用量与周额度占比
 
@@ -37,16 +37,18 @@ swift test
 
 ```
 Sources/Workdesk/
-  WorkdeskApp.swift    应用入口
-  ContentView.swift    侧边栏 + 分栏导航
-  Models.swift         数据模型
-  Store.swift          状态与持久化
-  MainlineView.swift   主线：分类 tab 栏、新建分类、引导空态
-  FavoritesView.swift  收藏流
-  UsageCard.swift      AI 用量卡片
-  UsageScanner.swift   扫描本地日志统计 token
+  WorkdeskApp.swift       应用入口
+  ContentView.swift       侧边栏 + 分栏导航
+  Models.swift            数据模型
+  Store.swift             状态与持久化
+  MainlineView.swift      主线：分类 tab 栏、新建分类、引导空态
+  CategoryTodoList.swift  分类内的待办：记事输入框、打勾、删除
+  FavoritesView.swift     收藏流
+  UsageCard.swift         AI 用量卡片
+  UsageScanner.swift      扫描本地日志统计 token
 Tests/WorkdeskTests/
-  StoreTests.swift     存储目录与收藏流的持久化
-  CategoryTests.swift  分类的新建、配色与持久化
+  StoreTests.swift        存储目录与收藏流的持久化
+  CategoryTests.swift     分类的新建、配色与持久化
+  TodoTests.swift         待办的归属、打勾、删除与持久化
   TestSupport.swift    临时目录等测试夹具
 ```

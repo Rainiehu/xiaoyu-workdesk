@@ -56,6 +56,11 @@ final class Store {
         todos.filter { !$0.done }.count
     }
 
+    /// 一个分类里的待办，按记下的先后排列。分类之间因此互不干扰。
+    func todos(in categoryID: Category.ID) -> [TodoItem] {
+        todos.filter { $0.categoryID == categoryID }
+    }
+
     /// 记一条待办。所属分类是必填的 —— 指向一个不存在的分类时什么也不发生，
     /// 于是「每条待办都落在某个分类里」这条约束由 `Store` 保证，不依赖视图层自觉。
     func addTodo(_ text: String, in categoryID: Category.ID) {
@@ -65,10 +70,12 @@ final class Store {
         saveTodos()
     }
 
+    /// 打勾/取消打勾。完成日只到天 —— 它是「被打勾的那一天」，不是打勾的那一刻，
+    /// 取消打勾就把它清掉，于是「没有完成日」和「没完成」永远是同一件事。
     func toggleTodo(_ item: TodoItem) {
         guard let i = todos.firstIndex(where: { $0.id == item.id }) else { return }
         todos[i].done.toggle()
-        todos[i].completedAt = todos[i].done ? .now : nil
+        todos[i].completedAt = todos[i].done ? Date.now.dayStart : nil
         saveTodos()
     }
 
