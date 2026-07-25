@@ -47,7 +47,7 @@ struct ContentView: View {
 
     private func badge(for section: SidebarSection) -> Int {
         switch section {
-        case .mainline: store.todos.filter { !$0.done }.count
+        case .mainline: store.unfinishedTodoCount
         case .favorites: 0
         }
     }

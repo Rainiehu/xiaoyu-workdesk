@@ -7,7 +7,7 @@ final class Store {
     /// 分类的显示顺序就是这个数组的顺序。
     private(set) var categories: [Category] = []
     private(set) var todos: [TodoItem] = []
-    var favorites: [FavoriteItem] = []
+    private(set) var favorites: [FavoriteItem] = []
     var usage: UsageSnapshot?
     var usageLoading = false
 
@@ -51,9 +51,16 @@ final class Store {
 
     // MARK: - Todos
 
+    /// 侧边栏徽标要的数字。派生数据一律从这里出，视图层不自己聚合。
+    var unfinishedTodoCount: Int {
+        todos.filter { !$0.done }.count
+    }
+
+    /// 记一条待办。所属分类是必填的 —— 指向一个不存在的分类时什么也不发生，
+    /// 于是「每条待办都落在某个分类里」这条约束由 `Store` 保证，不依赖视图层自觉。
     func addTodo(_ text: String, in categoryID: Category.ID) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
+        guard !t.isEmpty, categories.contains(where: { $0.id == categoryID }) else { return }
         todos.append(TodoItem(text: t, categoryID: categoryID))
         saveTodos()
     }

@@ -97,6 +97,32 @@ struct TodoCategoryTests {
         }
     }
 
+    @Test("待办必须落在一个已存在的分类里")
+    func todosNeedAnExistingCategory() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            store.addTodo("写周报", in: work.id)
+            store.addTodo("无处安放", in: UUID())
+
+            #expect(store.todos.map(\.text) == ["写周报"])
+        }
+    }
+
+    @Test("未完成的待办数量是侧边栏徽标要的那个数")
+    func unfinishedCountIgnoresFinishedTodos() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            store.addTodo("写周报", in: work.id)
+            store.addTodo("交周报", in: work.id)
+            #expect(store.unfinishedTodoCount == 2)
+
+            store.toggleTodo(try #require(store.todos.first))
+            #expect(store.unfinishedTodoCount == 1)
+        }
+    }
+
     @Test("分类与待办分别持久化在两份文件里")
     func categoriesAndTodosArePersistedSeparately() throws {
         try withTemporaryDirectory { dir in

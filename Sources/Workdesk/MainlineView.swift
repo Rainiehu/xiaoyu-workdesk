@@ -13,14 +13,12 @@ struct MainlineView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if store.categories.isEmpty {
-                onboarding
-            } else {
-                CategoryTabBar(selectedCategoryID: $selectedCategoryID)
+            if let selected {
+                CategoryTabBar(selected: selected.id) { selectedCategoryID = $0 }
                 Divider()
-                if let selected {
-                    CategoryPlaceholder(category: selected)
-                }
+                CategoryPlaceholder(category: selected)
+            } else {
+                onboarding
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -56,22 +54,19 @@ struct MainlineView: View {
 
 struct CategoryTabBar: View {
     @Environment(Store.self) private var store
-    @Binding var selectedCategoryID: Category.ID?
-
-    /// 与 `MainlineView.selected` 同一套退回规则，好让高亮的 tab 就是正在显示的那个分类。
-    private var effectiveSelection: Category.ID? {
-        store.categories.first { $0.id == selectedCategoryID }?.id ?? store.categories.first?.id
-    }
+    /// 正在显示的那个分类 —— 由主线算出来，好让高亮的 tab 和内容区永远是同一个分类。
+    let selected: Category.ID
+    let select: (Category.ID) -> Void
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(store.categories) { category in
-                    CategoryTab(category: category, isSelected: category.id == effectiveSelection) {
-                        selectedCategoryID = category.id
+                    CategoryTab(category: category, isSelected: category.id == selected) {
+                        select(category.id)
                     }
                 }
-                NewCategoryButton(onCreate: { selectedCategoryID = $0.id }) {
+                NewCategoryButton(onCreate: { select($0.id) }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
