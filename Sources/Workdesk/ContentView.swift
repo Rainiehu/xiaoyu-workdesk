@@ -1,16 +1,14 @@
 import SwiftUI
 
 enum SidebarSection: String, CaseIterable, Identifiable {
-    case today = "今日待办"
-    case history = "历史"
+    case mainline = "主线"
     case favorites = "收藏流"
 
     var id: Self { self }
 
     var icon: String {
         switch self {
-        case .today: "checkmark.circle"
-        case .history: "clock.arrow.circlepath"
+        case .mainline: "checklist"
         case .favorites: "bookmark"
         }
     }
@@ -18,7 +16,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @Environment(Store.self) private var store
-    @State private var selection: SidebarSection? = .today
+    @State private var selection: SidebarSection? = .mainline
 
     var body: some View {
         NavigationSplitView {
@@ -39,9 +37,8 @@ struct ContentView: View {
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
-            switch selection ?? .today {
-            case .today: TodayView()
-            case .history: HistoryView()
+            switch selection ?? .mainline {
+            case .mainline: MainlineView()
             case .favorites: FavoritesView()
             }
         }
@@ -50,9 +47,8 @@ struct ContentView: View {
 
     private func badge(for section: SidebarSection) -> Int {
         switch section {
-        case .today: store.todayTodos.filter { !$0.done }.count + store.overdueTodos.count
+        case .mainline: store.todos.filter { !$0.done }.count
         case .favorites: 0
-        case .history: 0
         }
     }
 }
