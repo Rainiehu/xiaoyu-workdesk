@@ -31,6 +31,19 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var plannedOn: Date?
 }
 
+/// 分类视图里左右两列的内容：左边待完成，右边已完成。
+/// 排序在 `Store` 里定死，这里只是分好的一份结果 —— 视图层照着铺就是，不自行排序。
+struct CategoryColumns: Equatable {
+    /// 左列。
+    var unfinished: [TodoItem]
+    /// 右列。
+    var finished: [TodoItem]
+
+    /// 这个分类一件事都没有。视图层照着它决定不分列 —— 判断放在这儿，
+    /// 免得视图自己去聚合两个数组。
+    var isEmpty: Bool { unfinished.isEmpty && finished.isEmpty }
+}
+
 /// 沙漏视图里的一天：一个计划日，和被安排在这天的待办。
 /// 只是 `Store` 分好的一份结果，不带任何行为 —— 聚合在 `Store` 里做，视图层照着铺就是。
 struct TimelineDay: Identifiable, Equatable {
