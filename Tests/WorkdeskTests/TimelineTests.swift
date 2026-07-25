@@ -151,14 +151,4 @@ struct TimelineTests {
             #expect(store.category(UUID()) == nil)
         }
     }
-
-    /// 记一条待办并当场排上计划日。
-    /// 分类的类型要写全名 —— 光写 `Category` 会撞上 Objective-C 运行时里的同名类型。
-    private func schedule(
-        _ text: String, in category: Workdesk.Category, on day: Date, _ store: Store
-    ) throws {
-        store.addTodo(text, in: category.id)
-        let todo = try #require(store.todos.last)
-        store.setPlannedDay(day, for: todo)
-    }
 }

@@ -4,7 +4,8 @@
 
 ## 功能
 
-- **主线** — 待办按自建的分类组织，分类以顶部 tab 呈现，新建只需输入名字、颜色自动分配；点进一个分类就看到它的待办，敲字回车记事，打勾完成、悬停删除
+- **主线** — 待办按自建的分类组织，分类以顶部 tab 呈现，新建只需输入名字、颜色自动分配；点进一个分类就看到左右两列，左边待完成、右边已完成，敲字回车记事，打勾完成、悬停删除
+- **沙漏视图** — 横跨所有分类的时间轴，按计划日铺开，今天锚在中间，上方是过去、下方是未来
 - **收藏流** — 粘贴链接或文字即收藏，链接卡片带域名标签、点击直达
 - **AI 用量** — 侧边栏底部小卡片，扫描本机 Claude Code / Codex 会话日志，展示今日 token 用量与周额度占比
 
@@ -42,13 +43,19 @@ Sources/Workdesk/
   Models.swift            数据模型
   Store.swift             状态与持久化
   MainlineView.swift      主线：分类 tab 栏、新建分类、引导空态
-  CategoryTodoList.swift  分类内的待办：记事输入框、打勾、删除
+  CategoryTodoList.swift  分类视图：记事输入框，待完成/已完成两列
+  HourglassView.swift     沙漏视图：按计划日铺开的时间轴
+  PlannedDayControl.swift 一条待办的排期入口与计划日面板
   FavoritesView.swift     收藏流
   UsageCard.swift         AI 用量卡片
   UsageScanner.swift      扫描本地日志统计 token
 Tests/WorkdeskTests/
-  StoreTests.swift        存储目录与收藏流的持久化
-  CategoryTests.swift     分类的新建、配色与持久化
-  TodoTests.swift         待办的归属、打勾、删除与持久化
-  TestSupport.swift    临时目录等测试夹具
+  StoreTests.swift           存储目录与收藏流的持久化
+  CategoryTests.swift        分类的新建、配色与持久化
+  TodoTests.swift            待办的归属、打勾、删除与持久化
+  PlannedDayTests.swift      排期、改期与清除计划日
+  CategoryColumnsTests.swift 分类视图两列的拼接与三套排序
+  TimelineTests.swift        沙漏视图的按日分组
+  DayLabelTests.swift        日期在界面上的写法
+  TestSupport.swift          临时目录等测试夹具
 ```

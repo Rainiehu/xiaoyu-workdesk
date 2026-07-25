@@ -86,6 +86,30 @@ final class Store {
         todos.filter { $0.categoryID == categoryID }
     }
 
+    /// 分类视图要的两列。三套排序规则都在这儿定死，视图层照着铺就是。
+    ///
+    /// 左列是两段直接拼起来的，不设分组标题：已排期的在上，按计划日从早到晚；
+    /// 未排期的在下，按创建日从新到旧 —— 最近才想到的事不该沉到底部。
+    /// 计划日只到天，同一天排了几条是常事，那时按记下的先后排 ——
+    /// 顺序写在比较里，不指望 `sorted` 碰巧稳定。
+    ///
+    /// 右列按完成日从新到旧，最近的成果在最上面。
+    func columns(in categoryID: Category.ID) -> CategoryColumns {
+        let mine = todos(in: categoryID)
+        let unfinished = mine.filter { !$0.done }
+        // 排期与否在这儿一次分清：拆出计划日随着待办一起走，下面排序就不必再问它在不在。
+        let scheduled = unfinished.compactMap { todo in todo.plannedOn.map { (todo: todo, day: $0) } }
+            .sorted { ($0.day, $0.todo.createdAt) < ($1.day, $1.todo.createdAt) }
+            .map(\.todo)
+        let unscheduled = unfinished.filter { $0.plannedOn == nil }
+            .sorted { $0.createdAt > $1.createdAt }
+        // 打了勾就必然有完成日；万一数据里缺了，退回创建日 ——
+        // 宁可这一条排得不准，也不让它从两列里消失。
+        let finished = mine.filter(\.done)
+            .sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
+        return CategoryColumns(unfinished: scheduled + unscheduled, finished: finished)
+    }
+
     /// 记一条待办。所属分类是必填的 —— 指向一个不存在的分类时什么也不发生，
     /// 于是「每条待办都落在某个分类里」这条约束由 `Store` 保证，不依赖视图层自觉。
     func addTodo(_ text: String, in categoryID: Category.ID) {
