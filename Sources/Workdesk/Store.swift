@@ -49,11 +49,36 @@ final class Store {
             ?? CategoryColor.palette[categories.count % CategoryColor.palette.count]
     }
 
+    /// 按 id 找回一个分类。沙漏视图里每条待办旁的彩色 tag 靠它取名字和颜色 ——
+    /// 找不着（分类被删了）就是 `nil`，视图层照着这个决定要不要画那个 tag。
+    func category(_ id: Category.ID) -> Category? {
+        categories.first { $0.id == id }
+    }
+
     // MARK: - Todos
 
     /// 侧边栏徽标要的数字。派生数据一律从这里出，视图层不自己聚合。
     var unfinishedTodoCount: Int {
         todos.filter { !$0.done }.count
+    }
+
+    /// 沙漏视图要的分组：所有分类中排了计划日的待办，按计划日铺成一条轴，日期升序。
+    /// 没有计划日的待办不出现在这里；没有待办的日期不产生分组，于是滚动是紧凑的。
+    /// 但今天这一组恒定存在 —— 它是那条轴的锚点，空无一事也照样在。
+    ///
+    /// 已完成的待办落在它的**计划日**，不是完成日：打勾不会让条目跳到别的日期去。
+    /// 计划日在过去而未完成的待办也只是留在它那一天，这里不给它任何特殊位置，见 ADR-0001。
+    /// - Parameter today: 「今天」是哪天。刻意没有默认值 —— 由调用方交进来，
+    ///   分组因此既可测，也不会有哪一处偷偷去问一次时钟。
+    func timeline(today: Date) -> [TimelineDay] {
+        var byDay: [Date: [TodoItem]] = [today.dayStart: []]
+        for todo in todos {
+            guard let planned = todo.plannedOn else { continue }
+            byDay[planned.dayStart, default: []].append(todo)
+        }
+        return byDay
+            .sorted { $0.key < $1.key }
+            .map { TimelineDay(day: $0.key, todos: $0.value) }
     }
 
     /// 一个分类里的待办，按记下的先后排列。分类之间因此互不干扰。
