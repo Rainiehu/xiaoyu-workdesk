@@ -20,6 +20,14 @@ open "build/我的工作台.app"
 
 `build.sh` 会以 release 模式编译并组装出 `build/我的工作台.app`。
 
+跑测试：
+
+```bash
+swift test
+```
+
+测试用 swift-testing。读写数据的测试都指向临时目录，不碰 `~/Library/Application Support/` 下的真实数据。
+
 ## 数据存储
 
 待办与收藏保存在 `~/Library/Application Support/XiaoyuWorkdesk/`（`todos.json` / `favorites.json`），重启不丢。
@@ -36,4 +44,6 @@ Sources/Workdesk/
   FavoritesView.swift  收藏流
   UsageCard.swift      AI 用量卡片
   UsageScanner.swift   扫描本地日志统计 token
+Tests/WorkdeskTests/
+  StoreTests.swift     Store 的持久化行为
 ```

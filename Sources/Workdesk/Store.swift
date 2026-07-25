@@ -9,14 +9,18 @@ final class Store {
     var usage: UsageSnapshot?
     var usageLoading = false
 
-    private let dir: URL = {
+    /// 正常运行时的存储位置。只算路径，不建目录 —— 建目录是 `init` 的事。
+    nonisolated static var defaultDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let d = base.appendingPathComponent("XiaoyuWorkdesk", isDirectory: true)
-        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
-        return d
-    }()
+        return base.appendingPathComponent("XiaoyuWorkdesk", isDirectory: true)
+    }
 
-    init() {
+    private let directory: URL
+
+    /// - Parameter directory: 存储目录，默认是 `defaultDirectory`。测试传一个临时目录进来。
+    init(directory: URL = Store.defaultDirectory) {
+        self.directory = directory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         todos = load("todos.json") ?? []
         favorites = load("favorites.json") ?? []
     }
@@ -105,7 +109,7 @@ final class Store {
     private func saveFavorites() { save(favorites, to: "favorites.json") }
 
     private func load<T: Decodable>(_ name: String) -> T? {
-        let url = dir.appendingPathComponent(name)
+        let url = directory.appendingPathComponent(name)
         guard let data = try? Data(contentsOf: url) else { return nil }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
@@ -117,7 +121,7 @@ final class Store {
         enc.dateEncodingStrategy = .iso8601
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? enc.encode(value) {
-            try? data.write(to: dir.appendingPathComponent(name), options: .atomic)
+            try? data.write(to: directory.appendingPathComponent(name), options: .atomic)
         }
     }
 }
