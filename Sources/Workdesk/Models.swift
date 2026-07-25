@@ -54,6 +54,13 @@ struct TimelineDay: Identifiable, Equatable {
     var id: Date { day }
 }
 
+/// 记着用户上一次怎么选的那些小事。它们不是数据，是习惯 ——
+/// 单独存一份，与待办、分类各不相干。
+struct Preferences: Codable, Equatable {
+    /// 沙漏视图记事时上次选中的分类。还没选过就是 `nil`。
+    var recordingCategoryID: Category.ID?
+}
+
 struct FavoriteItem: Identifiable, Codable, Equatable {
     var id = UUID()
     var title: String

@@ -11,6 +11,9 @@ final class Store {
     var usage: UsageSnapshot?
     var usageLoading = false
 
+    /// 上次选来记事的分类。可能指向一个已经不在了的分类 —— 对外的 `recordingCategory` 管这件事。
+    private var chosenRecordingCategoryID: Category.ID?
+
     /// 正常运行时的存储位置。只算路径，不建目录 —— 建目录是 `init` 的事。
     nonisolated static var defaultDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -26,6 +29,7 @@ final class Store {
         categories = load(Self.categoriesFile) ?? []
         todos = load(Self.todosFile) ?? []
         favorites = load("favorites.json") ?? []
+        chosenRecordingCategoryID = (load(Self.preferencesFile) as Preferences?)?.recordingCategoryID
     }
 
     // MARK: - Categories
@@ -53,6 +57,34 @@ final class Store {
     /// 找不着（分类被删了）就是 `nil`，视图层照着这个决定要不要画那个 tag。
     func category(_ id: Category.ID) -> Category? {
         categories.first { $0.id == id }
+    }
+
+    // MARK: - 记事的分类
+
+    /// 沙漏视图记事时归到哪个分类：上次选的那个。还没选过、或选的那个分类没了，
+    /// 就落回第一个分类 —— 「记不起来」于是不是一个要视图层去应付的状态。
+    /// 一个分类都没有时是 `nil`：那时无处可记，也就不该记出一条无归属的待办。
+    var recordingCategory: Category? {
+        chosenRecordingCategoryID.flatMap(category) ?? categories.first
+    }
+
+    /// 选一个分类来记事。这个选择跨重启保留，好让连续记同一类事情不必反复选。
+    /// 指向不存在的分类时什么也不发生，与 `addTodo` 同一副脾气。
+    func chooseRecordingCategory(_ id: Category.ID) {
+        guard categories.contains(where: { $0.id == id }) else { return }
+        chosenRecordingCategoryID = id
+        savePreferences()
+    }
+
+    /// 在沙漏视图记一条待办：归到当前选来记事的分类，并当场排在今天 ——
+    /// 于是它立刻落在那条轴上，而不是凭空消失到某个分类里去。
+    /// 「归到哪个分类」和「排在哪一天」这两个决定都在这儿，视图层只管把字交过来。
+    /// 一个分类都没有时什么也不发生：那时无处可记，也就不该记出一条无归属的待办。
+    /// - Parameter today: 「今天」由调用方交进来，与 `timeline(today:)` 同一副脾气 ——
+    ///   这件事因此可测，也没有哪一处偷偷去问一次时钟。交的是时刻，排上的是那个日子。
+    func recordOnTimeline(_ text: String, today: Date) {
+        guard let category = recordingCategory else { return }
+        addTodo(text, in: category.id, plannedOn: today.dayStart)
     }
 
     // MARK: - Todos
@@ -112,10 +144,13 @@ final class Store {
 
     /// 记一条待办。所属分类是必填的 —— 指向一个不存在的分类时什么也不发生，
     /// 于是「每条待办都落在某个分类里」这条约束由 `Store` 保证，不依赖视图层自觉。
-    func addTodo(_ text: String, in categoryID: Category.ID) {
+    /// - Parameter day: 一并排上的计划日，默认不排 —— 分类视图里记事就是不排期的，
+    ///   排期是之后另点一下的事。沙漏视图里记事则当场交一个日子进来，
+    ///   好让新记下的这条立刻出现在使用者正看着的那条轴上。
+    func addTodo(_ text: String, in categoryID: Category.ID, plannedOn day: Date? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, categories.contains(where: { $0.id == categoryID }) else { return }
-        todos.append(TodoItem(text: t, categoryID: categoryID))
+        todos.append(TodoItem(text: t, categoryID: categoryID, plannedOn: day))
         saveTodos()
     }
 
@@ -190,6 +225,8 @@ final class Store {
     // MARK: - Persistence
 
     private static let categoriesFile = "categories.json"
+    /// 用户的选择偏好。与数据分开存 —— 偏好丢了只是少记住一次选择，不该跟待办同生共死。
+    private static let preferencesFile = "preferences.json"
     /// 待办的存放位置。刻意不叫 `todos.json` —— 那是待办还没有所属分类时的旧文件，
     /// 已经废弃：不读取、不转换，装着旧数据的机器首次运行就是空状态。
     private static let todosFile = "todos-v2.json"
@@ -197,6 +234,10 @@ final class Store {
     private func saveCategories() { save(categories, to: Self.categoriesFile) }
     private func saveTodos() { save(todos, to: Self.todosFile) }
     private func saveFavorites() { save(favorites, to: "favorites.json") }
+
+    private func savePreferences() {
+        save(Preferences(recordingCategoryID: chosenRecordingCategoryID), to: Self.preferencesFile)
+    }
 
     private func load<T: Decodable>(_ name: String) -> T? {
         let url = directory.appendingPathComponent(name)

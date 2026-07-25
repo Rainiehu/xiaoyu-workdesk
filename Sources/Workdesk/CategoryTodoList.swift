@@ -22,9 +22,8 @@ struct CategoryTodoList: View {
     /// 左列的内容宽度上限。窗口再宽，一行字也不跟着摊开。
     private let unfinishedColumnMaxWidth: CGFloat = 620
 
-    /// 输入框那一条的高度。写成常量而不是由内容撑开：右列要照着它在顶上留出一段，
-    /// 好让两列的第一行齐平 —— 两列因此看着是一块板，不是两块各自开始的东西。
-    private let inputHeight: CGFloat = 42
+    /// 右列顶上要让出的那一段，就是输入框那一条的高度 —— 从它那儿取，两列的第一行因此齐平。
+    private let inputHeight = TodoInputField<EmptyView>.height
 
     /// 两列共同的上留白。
     private let topInset: CGFloat = 28
@@ -88,18 +87,16 @@ struct CategoryTodoList: View {
     }
 
     private var input: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "plus.circle.fill")
-                .foregroundStyle(category.color.tint.opacity(0.8))
-                .imageScale(.large)
-            TextField("记一件事，回车记下…", text: $draft)
-                .textFieldStyle(.plain)
-                .focused($inputFocused)
-                .onSubmit(record)
+        TodoInputField(
+            tint: category.color.tint,
+            prompt: "记一件事，回车记下…",
+            text: $draft,
+            focused: $inputFocused,
+            submit: record
+        ) {
+            // 分类视图里记到哪个分类是不问自明的 —— 眼下这个分类就是了。
+            EmptyView()
         }
-        .padding(.horizontal, 14)
-        .frame(height: inputHeight)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.5)))
     }
 
     private var empty: some View {
