@@ -16,7 +16,7 @@ struct MainlineView: View {
             if let selected {
                 CategoryTabBar(selected: selected.id) { selectedCategoryID = $0 }
                 Divider()
-                CategoryPlaceholder(category: selected)
+                CategoryTodoList(category: selected)
             } else {
                 onboarding
             }
@@ -155,23 +155,6 @@ struct NewCategoryButton<Label: View>: View {
         draft = ""
         presented = false
         onCreate(category)
-    }
-}
-
-// MARK: - 分类内容（下一张票交付真正的清单）
-
-private struct CategoryPlaceholder: View {
-    let category: Category
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "circle.dashed")
-                .font(.system(size: 34))
-                .foregroundStyle(category.color.tint.opacity(0.5))
-            Text("「\(category.name)」还是空的")
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

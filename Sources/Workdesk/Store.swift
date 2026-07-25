@@ -56,6 +56,11 @@ final class Store {
         todos.filter { !$0.done }.count
     }
 
+    /// 一个分类的清单，按记下的先后排列。分类之间因此互不干扰。
+    func todos(in categoryID: Category.ID) -> [TodoItem] {
+        todos.filter { $0.categoryID == categoryID }
+    }
+
     /// 记一条待办。所属分类是必填的 —— 指向一个不存在的分类时什么也不发生，
     /// 于是「每条待办都落在某个分类里」这条约束由 `Store` 保证，不依赖视图层自觉。
     func addTodo(_ text: String, in categoryID: Category.ID) {
