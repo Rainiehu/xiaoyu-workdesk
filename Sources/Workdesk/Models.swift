@@ -22,9 +22,9 @@ struct TodoItem: Identifiable, Codable, Equatable {
     /// 所属分类。每条待办属于且只属于一个分类。
     var categoryID: Category.ID
     var done: Bool = false
-    /// 创建日。带着时刻落盘 —— 同一天记下的几条待办要靠它分出先后。
+    /// 创建时刻。带着时刻落盘 —— 同一天记下的几条待办要靠它分出先后。
     var createdAt: Date = .now
-    /// 完成日，只到天。没完成就没有完成日。
+    /// 完成时刻。同样带着时刻落盘，显示时才截到天。没完成就没有完成日。
     var completedAt: Date?
 }
 

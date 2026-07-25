@@ -70,12 +70,13 @@ final class Store {
         saveTodos()
     }
 
-    /// 打勾/取消打勾。完成日只到天 —— 它是「被打勾的那一天」，不是打勾的那一刻，
-    /// 取消打勾就把它清掉，于是「没有完成日」和「没完成」永远是同一件事。
+    /// 打勾/取消打勾。完成时刻原样落盘 —— 截到天是显示层的事，底下留着全时刻，
+    /// 于是同一天完成的几条仍分得出先后。取消打勾就把它清掉，
+    /// 于是「没有完成日」和「没完成」永远是同一件事。
     func toggleTodo(_ item: TodoItem) {
         guard let i = todos.firstIndex(where: { $0.id == item.id }) else { return }
         todos[i].done.toggle()
-        todos[i].completedAt = todos[i].done ? Date.now.dayStart : nil
+        todos[i].completedAt = todos[i].done ? .now : nil
         saveTodos()
     }
 
