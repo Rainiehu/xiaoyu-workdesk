@@ -95,6 +95,8 @@ private struct TodoRow: View {
 
             Spacer(minLength: 8)
 
+            PlannedDayControl(todo: todo, rowHovering: hovering)
+
             if hovering {
                 Button {
                     withAnimation { store.deleteTodo(todo) }

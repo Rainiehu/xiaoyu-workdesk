@@ -70,17 +70,37 @@ final class Store {
         saveTodos()
     }
 
-    /// 打勾/取消打勾。完成日只到天 —— 它是「被打勾的那一天」，不是打勾的那一刻，
-    /// 取消打勾就把它清掉，于是「没有完成日」和「没完成」永远是同一件事。
+    /// 打勾/取消打勾。完成时刻原样落盘 —— 截到天是显示层的事，底下留着全时刻，
+    /// 于是同一天完成的几条仍分得出先后。取消打勾就把它清掉，
+    /// 于是「没有完成日」和「没完成」永远是同一件事。
     func toggleTodo(_ item: TodoItem) {
-        guard let i = todos.firstIndex(where: { $0.id == item.id }) else { return }
-        todos[i].done.toggle()
-        todos[i].completedAt = todos[i].done ? Date.now.dayStart : nil
-        saveTodos()
+        update(item) {
+            $0.done.toggle()
+            $0.completedAt = $0.done ? .now : nil
+        }
+    }
+
+    /// 排上计划日，或改到另一天。只动计划日 —— 创建日与完成日各存各的，改期碰不到它们。
+    func setPlannedDay(_ day: Date, for item: TodoItem) {
+        update(item) { $0.plannedOn = day }
+    }
+
+    /// 清除计划日，待办回到未排期。未排期是个正常状态，不是缺失 ——
+    /// 「总得做但不急」的事就该一直待在这儿。
+    func clearPlannedDay(_ item: TodoItem) {
+        update(item) { $0.plannedOn = nil }
     }
 
     func deleteTodo(_ item: TodoItem) {
         todos.removeAll { $0.id == item.id }
+        saveTodos()
+    }
+
+    /// 改一条待办并落盘。手里那份可能是视图层拿着的旧副本，所以一律按 id 现找现改 ——
+    /// 没找着（比如同时被删了）就什么也不发生。
+    private func update(_ item: TodoItem, _ change: (inout TodoItem) -> Void) {
+        guard let i = todos.firstIndex(where: { $0.id == item.id }) else { return }
+        change(&todos[i])
         saveTodos()
     }
 

@@ -44,8 +44,9 @@ struct TodoTests {
             store.toggleTodo(try #require(store.todos.first))
             let done = try #require(store.todos.first)
             #expect(done.done)
-            // 完成日是「被打勾的那一天」，不含时刻。
-            #expect(done.completedAt == Date.now.dayStart)
+            // 完成时刻原样记下 —— 截到天是显示层的事，底下留着全时刻。
+            let completedAt = try #require(done.completedAt)
+            #expect(abs(completedAt.timeIntervalSinceNow) < 1)
 
             store.toggleTodo(done)
             let undone = try #require(store.todos.first)
@@ -82,12 +83,14 @@ struct TodoTests {
             #expect(reopened.todos(in: work.id).map(\.text) == ["写周报"])
             #expect(reopened.todos(in: life.id).map(\.text) == ["买菜"])
             #expect(reopened.todos.map(\.done) == [true, false])
-            // 完成日只到天，落盘再读回来是同一天，不用留误差。
-            #expect(reopened.todos.map(\.completedAt) == [Date.now.dayStart, nil])
+            #expect(reopened.todos.map { $0.completedAt != nil } == [true, false])
 
-            // 创建日带着时刻，单独比：落盘用的 ISO8601 不含小数秒，读回来只精确到秒。
+            // 两个时刻都单独比：落盘用的 ISO8601 不含小数秒，读回来只精确到秒。
             for (before, after) in zip(store.todos, reopened.todos) {
                 #expect(abs(after.createdAt.timeIntervalSince(before.createdAt)) < 1)
+                if let b = before.completedAt, let a = after.completedAt {
+                    #expect(abs(a.timeIntervalSince(b)) < 1)
+                }
             }
         }
     }
