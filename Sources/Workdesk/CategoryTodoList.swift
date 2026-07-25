@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 一个分类的待办清单：顶部输入框记事，下面是这个分类的待办。
+/// 一个分类里的待办：输入框在顶上记事，下面是这个分类已经记下的那些。
 /// 朴素的单列，待完成与已完成只靠左侧圆圈区分 —— 分列与排序是后面的事。
 struct CategoryTodoList: View {
     @Environment(Store.self) private var store
@@ -12,26 +12,26 @@ struct CategoryTodoList: View {
     private var todos: [TodoItem] { store.todos(in: category.id) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                input
+        VStack(spacing: 0) {
+            // 输入框在 ScrollView 外面：待办再多也留在顶上，记事随时都在手边。
+            input
+                .padding(.horizontal, 28)
+                .padding(.top, 28)
+                .frame(maxWidth: 640)
 
-                if todos.isEmpty {
-                    empty
-                } else {
-                    LazyVStack(spacing: 2) {
-                        ForEach(todos) { todo in
-                            TodoRow(todo: todo, tint: category.color.tint)
-                        }
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(todos) { todo in
+                        TodoRow(todo: todo, tint: category.color.tint)
                     }
                 }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 16)
+                .frame(maxWidth: 640, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(28)
-            .frame(maxWidth: 640, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .overlay { if todos.isEmpty { empty } }
         }
-        // 换一个分类就是换一份清单，半句草稿不跟着走 —— 否则它会被记到另一个分类里去。
-        .onChange(of: category.id) { draft = "" }
     }
 
     private var input: some View {
@@ -57,8 +57,9 @@ struct CategoryTodoList: View {
             Text("「\(category.name)」还是空的")
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        .padding(.top, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .allowsHitTesting(false)
     }
 
     /// 记下草稿里的那件事。空白输入交给 `Store` 挡掉，这里只管清空并留住焦点，好让记事可以一条接一条。
@@ -90,7 +91,7 @@ private struct TodoRow: View {
             .help(todo.done ? "取消完成" : "标记完成")
 
             Text(todo.text)
-                .lineLimit(2)
+                .multilineTextAlignment(.leading)
 
             Spacer(minLength: 8)
 
