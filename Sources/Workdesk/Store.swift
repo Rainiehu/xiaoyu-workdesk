@@ -158,7 +158,7 @@ final class Store {
     /// 于是同一天完成的几条仍分得出先后。取消打勾就把它清掉，
     /// 于是「没有完成日」和「没完成」永远是同一件事。
     func toggleTodo(_ item: TodoItem) {
-        update(item) {
+        update(item.id) {
             $0.done.toggle()
             $0.completedAt = $0.done ? .now : nil
         }
@@ -166,13 +166,26 @@ final class Store {
 
     /// 排上计划日，或改到另一天。只动计划日 —— 创建日与完成日各存各的，改期碰不到它们。
     func setPlannedDay(_ day: Date, for item: TodoItem) {
-        update(item) { $0.plannedOn = day }
+        update(item.id) { $0.plannedOn = day }
+    }
+
+    /// 改期到某一天。沙漏视图里把一条待办从一个日期分组拖到另一个分组时走这条路。
+    /// 与 `setPlannedDay` 是同一件事，只是认 id 不认待办本身 —— 拖着走的一路上只有一个身份。
+    ///
+    /// 只动计划日 —— 归属分类、创建日、完成日都不因这一拖而变。往哪一天拖是时间轴上的事，
+    /// 归属是横轴上的事，两条轴在这里不交叉。
+    /// - Parameter day: 目标那一天。交进来的就是分组那一天，`Store` 不替它截断。
+    /// - Returns: 这一放是否落到了实处。找不着那条待办（比如它同时被删了）就是 `false`，
+    ///   视图层照着它告诉系统这次拖拽接住了没有。
+    @discardableResult
+    func reschedule(_ id: TodoItem.ID, to day: Date) -> Bool {
+        update(id) { $0.plannedOn = day }
     }
 
     /// 清除计划日，待办回到未排期。未排期是个正常状态，不是缺失 ——
     /// 「总得做但不急」的事就该一直待在这儿。
     func clearPlannedDay(_ item: TodoItem) {
-        update(item) { $0.plannedOn = nil }
+        update(item.id) { $0.plannedOn = nil }
     }
 
     func deleteTodo(_ item: TodoItem) {
@@ -181,11 +194,13 @@ final class Store {
     }
 
     /// 改一条待办并落盘。手里那份可能是视图层拿着的旧副本，所以一律按 id 现找现改 ——
-    /// 没找着（比如同时被删了）就什么也不发生。
-    private func update(_ item: TodoItem, _ change: (inout TodoItem) -> Void) {
-        guard let i = todos.firstIndex(where: { $0.id == item.id }) else { return }
+    /// 没找着（比如同时被删了）就什么也不发生，返回 `false`。
+    @discardableResult
+    private func update(_ id: TodoItem.ID, _ change: (inout TodoItem) -> Void) -> Bool {
+        guard let i = todos.firstIndex(where: { $0.id == id }) else { return false }
         change(&todos[i])
         saveTodos()
+        return true
     }
 
     // MARK: - Favorites
