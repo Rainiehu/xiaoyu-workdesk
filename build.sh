@@ -25,13 +25,22 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <!-- 沙漏视图里拖着条目改期时传的那个类型。与 HourglassView.swift 里的 UTType.workdeskTodo
-         是同一个标识符，两边要一起改；在这儿声明过，系统才认得它是本应用自家的类型。 -->
+    <!-- 拖拽时传的两个自家类型：沙漏视图里拖着条目改期用前者，tab 栏上拖着分类调顺序用后者。
+         与 HourglassView.swift 的 UTType.workdeskTodo、MainlineView.swift 的
+         UTType.workdeskCategory 是同一批标识符，两边要一起改；在这儿声明过，
+         系统才认得它们是本应用自家的类型。 -->
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>
             <key>UTTypeIdentifier</key><string>cc.huxiaoyu.workdesk.todo</string>
             <key>UTTypeDescription</key><string>待办</string>
+            <key>UTTypeConformsTo</key>
+            <array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key><dict/>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>cc.huxiaoyu.workdesk.category</string>
+            <key>UTTypeDescription</key><string>分类</string>
             <key>UTTypeConformsTo</key>
             <array><string>public.data</string></array>
             <key>UTTypeTagSpecification</key><dict/>

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// tab 栏上的一项。沙漏是唯一不代表分类的那一项，永远排在首位。
 enum MainlineTab: Hashable {
@@ -132,11 +133,21 @@ private struct HourglassTab: View {
     }
 }
 
+/// 分类 tab。点它切过去，右键是这个分类的全部管理动作：改名、换色、删除。
+/// 拖着它放到另一个 tab 上就换了顺序 —— 最常用的分类因此可以排到靠前的位置。
 private struct CategoryTab: View {
+    @Environment(Store.self) private var store
     let category: Category
     let isSelected: Bool
     let select: () -> Void
     @State private var hovering = false
+    @State private var renaming = false
+    /// 刚刚有一次删除被拦下时，里头还剩多少条待办。非空分类删不掉这件事由 `Store` 判，
+    /// 连同这个数字一起交回来，这儿只负责把话说清楚。
+    @State private var refusedTodoCount = 0
+    @State private var refusedDeletion = false
+    /// 有别的 tab 正悬在这个 tab 上方。松手它就落到这个位置上。
+    @State private var targeted = false
 
     var body: some View {
         Button(action: select) {
@@ -146,9 +157,122 @@ private struct CategoryTab: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .tabChip(category.color.tint, isSelected: isSelected, hovering: hovering)
+                // 落点指示与沙漏视图里那圈一样是青色描边：「松手会落在这儿」两处是同一句话。
+                .overlay(Capsule().strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .contextMenu { menu }
+        .popover(isPresented: $renaming, arrowEdge: .bottom) {
+            // 起名和改名是同一件事，所以是同一个面板，只是这次先装着原来的名字。
+            CategoryNamePanel(title: "重命名分类", confirm: "改名", initial: category.name) { name in
+                store.renameCategory(category.id, to: name)
+                renaming = false
+            }
+        }
+        // 拦下来之后只说明为什么，不在这儿给「连同待办一起删」的入口 ——
+        // 那正是这条约束要防的事。疏通的路子在待办行的右键菜单里。
+        .alert("「\(category.name)」里还有待办", isPresented: $refusedDeletion) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("先把这 \(refusedTodoCount) 条待办移到别的分类，或者删掉，再来删这个分类。")
+        }
+        .draggable(DraggedCategory(id: category.id))
+        .dropDestination(for: DraggedCategory.self) { dropped, _ in
+            // 一次拖一个 —— tab 栏上没有多选。落到这个 tab 的位置上，其余的依次让开。
+            guard let dropped = dropped.first else { return false }
+            store.moveCategory(dropped.id, onto: category.id)
+            return true
+        } isTargeted: { targeted = $0 }
+        .animation(.easeOut(duration: 0.12), value: targeted)
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        Button("重命名…") { renaming = true }
+        Menu("换颜色") {
+            ForEach(CategoryColor.palette, id: \.self) { color in
+                Button {
+                    store.recolorCategory(category.id, to: color)
+                } label: {
+                    // 当前那个前面带勾。撞色是允许的，所以这儿不灰掉任何一个。
+                    if color == category.color {
+                        Label(color.label, systemImage: "checkmark")
+                    } else {
+                        Text(color.label)
+                    }
+                }
+            }
+        }
+        Divider()
+        Button("删除分类", role: .destructive) { delete() }
+    }
+
+    /// 空分类直接删，不弹确认 —— 清理的动作不该啰嗦。非空的由 `Store` 拦下，
+    /// 这儿只把「为什么没删成」说出来。分类本身已经不在了就什么也不说：没什么好提示的。
+    private func delete() {
+        switch store.deleteCategory(category.id) {
+        case .deleted, .noSuchCategory:
+            break
+        case .refused(let todoCount):
+            refusedTodoCount = todoCount
+            refusedDeletion = true
+        }
+    }
+}
+
+/// 拖拽时在两个 tab 之间递过去的东西：一个分类的身份，仅此而已。
+/// 与沙漏视图里的 `DraggedTodo` 是同一套路数：只带 id，落下时现找现挪。
+/// 类型是自家的，于是外来的文字、链接接不住，从 tab 栏拖出去别的应用也接不住。
+private struct DraggedCategory: Codable, Transferable {
+    var id: Category.ID
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .workdeskCategory)
+    }
+}
+
+extension UTType {
+    /// 只有 tab 栏自己拖出来的分类认得这个类型。与 `build.sh` 里 Info.plist 的
+    /// `UTExportedTypeDeclarations` 是同一个标识符，两边要一起改。
+    fileprivate static let workdeskCategory = UTType(exportedAs: "cc.huxiaoyu.workdesk.category")
+}
+
+/// 给分类起名字的小面板：新建和改名共用一副样子 —— 在界面上它们是同一个动作，
+/// 只有标题、按钮上的字、以及输入框里先装着什么不一样。
+/// 空白名字由 `Store` 挡掉，这儿只负责把字交出去。
+private struct CategoryNamePanel: View {
+    let title: String
+    let confirm: String
+    /// 输入框里先装着的字。新建时空着，改名时是原来的名字。
+    var initial: String = ""
+    let submit: (String) -> Void
+
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            TextField("给它起个名字", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 200)
+                .focused($focused)
+                .onSubmit { submit(draft) }
+            HStack {
+                Spacer()
+                Button(confirm) { submit(draft) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(16)
+        // 每次打开都从头装一遍 —— 上一次改到一半的草稿不该留到下一次。
+        .onAppear {
+            draft = initial
+            focused = true
+        }
     }
 }
 
@@ -184,36 +308,17 @@ struct NewCategoryButton<Label: View>: View {
     @ViewBuilder let label: () -> Label
 
     @State private var presented = false
-    @State private var draft = ""
-    @FocusState private var focused: Bool
 
     var body: some View {
         Button { presented = true } label: { label() }
             .buttonStyle(.plain)
             .popover(isPresented: $presented, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("新建分类")
-                        .font(.headline)
-                    TextField("给它起个名字", text: $draft)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 200)
-                        .focused($focused)
-                        .onSubmit(create)
-                    HStack {
-                        Spacer()
-                        Button("创建", action: create)
-                            .keyboardShortcut(.defaultAction)
-                            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-                .padding(16)
-                .onAppear { focused = true }
+                CategoryNamePanel(title: "新建分类", confirm: "创建", submit: create)
             }
     }
 
-    private func create() {
-        guard let category = store.addCategory(draft) else { return }
-        draft = ""
+    private func create(_ name: String) {
+        guard let category = store.addCategory(name) else { return }
         presented = false
         onCreate(category)
     }
@@ -231,6 +336,20 @@ extension CategoryColor {
         case .purple: .purple
         case .pink: .pink
         case .orange: .orange
+        }
+    }
+
+    /// 换颜色的菜单里这个颜色叫什么。只在那一处用得着 —— 别处的颜色都是看见的，不用叫名字。
+    var label: String {
+        switch self {
+        case .teal: "青"
+        case .mint: "薄荷"
+        case .cyan: "天蓝"
+        case .blue: "蓝"
+        case .indigo: "靛蓝"
+        case .purple: "紫"
+        case .pink: "粉"
+        case .orange: "橙"
         }
     }
 }
