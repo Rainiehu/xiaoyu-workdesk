@@ -7,9 +7,12 @@ swift build -c release
 
 APP="build/我的工作台.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp .build/release/Workdesk "$APP/Contents/MacOS/Workdesk"
+# 图标。要在 codesign 之前放进去 —— 签名封的是整个 bundle，之后再塞东西会让签名失效。
+# 它由 Resources/makeicon.swift 生成，改设计就重跑那个脚本，见 README。
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -21,6 +24,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>CFBundleName</key><string>我的工作台</string>
     <key>CFBundleDisplayName</key><string>我的工作台</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>

@@ -18,7 +18,29 @@
 open "build/我的工作台.app"
 ```
 
-`build.sh` 会以 release 模式编译并组装出 `build/我的工作台.app`。
+`build.sh` 会以 release 模式编译并组装出 `build/我的工作台.app`，把图标放进去，并做一次 ad-hoc 签名。ad-hoc 签名只够本机自己跑 —— 拷给别人时对方仍会被 Gatekeeper 拦下，得右键「打开」。
+
+### 装进 /Applications
+
+只装一次，之后 `./build.sh` 就直接生效，不用再拷：
+
+```bash
+ln -s "$PWD/build/我的工作台.app" "/Applications/我的工作台.app"
+```
+
+`/Applications` 里放的是软链接，app 实体始终只有仓库里这一份 —— 不会出现装好的那份悄悄落后于代码。代价是这个仓库不能随便移走或删掉，否则链接就断了。
+
+### 图标
+
+`Resources/AppIcon.icns` 由 `Resources/makeicon.swift` 生成，十个尺寸各自矢量重绘（不是缩放），改了设计就重跑：
+
+```bash
+mkdir -p /tmp/AppIcon.iconset
+swift Resources/makeicon.swift /tmp/AppIcon.iconset
+iconutil -c icns /tmp/AppIcon.iconset -o Resources/AppIcon.icns
+```
+
+图案是沙漏加一条横穿腰部的今天线 —— 正是这个 app 的两条正交轴：纵轴是时间（今天锚在中间），横轴是分类。
 
 跑测试：
 
