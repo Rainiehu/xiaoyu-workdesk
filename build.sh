@@ -55,6 +55,14 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 </plist>
 EOF
 
-codesign --force -s - "$APP" >/dev/null 2>&1
+# 有本机那张自签名证书就用它，签名因此每次都一样，钥匙串之类按程序记的授权点一次就够。
+# 没有就退回 ad-hoc —— app 照样能跑，只是每次重建都会被系统当成一个新程序。
+# 那张证书由 Resources/make-signing-cert.sh 建，只需跑一次。
+IDENTITY="Workdesk Local Signing"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+    codesign --force -s "$IDENTITY" "$APP" >/dev/null 2>&1
+else
+    codesign --force -s - "$APP" >/dev/null 2>&1
+fi
 
 echo "Built: $APP"

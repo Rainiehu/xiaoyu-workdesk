@@ -42,7 +42,6 @@ struct ContentView: View {
             case .favorites: FavoritesView()
             }
         }
-        .task { store.refreshUsage() }
     }
 
     private func badge(for section: SidebarSection) -> Int {

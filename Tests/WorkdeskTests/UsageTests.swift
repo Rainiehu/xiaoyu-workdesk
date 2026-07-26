@@ -1,0 +1,96 @@
+import Foundation
+import Testing
+
+@testable import Workdesk
+
+@Suite("用量与限流")
+struct UsageTests {
+    /// `/api/oauth/usage` 的真实返回形状，数字改过。留着整份而不是精简版 ——
+    /// 那一串眼下全是 null 的细分字段（seven_day_opus、tangelo…）正是解析要绕开的东西。
+    static let claudeUsageJSON = """
+    {"five_hour":{"utilization":19.0,"resets_at":"2026-07-26T14:49:59.679695+00:00",
+     "limit_dollars":null,"used_dollars":null,"remaining_dollars":null},
+     "seven_day":{"utilization":34.0,"resets_at":"2026-07-27T09:59:59.679715+00:00",
+     "limit_dollars":null},
+     "seven_day_opus":null,"tangelo":null,"nimbus_quill":null,
+     "extra_usage":{"is_enabled":true,"monthly_limit":10000,"used_credits":3072.0,
+     "utilization":30.72,"currency":"AUD","decimal_places":2,"user_disabled":false},
+     "limits":[{"kind":"session","percent":19,"severity":"normal","is_active":false}],
+     "member_dashboard_available":false}
+    """.data(using: .utf8)!
+
+    @Test("两个限流窗口都解析出来，百分比与重置时刻都在")
+    func parsesBothWindows() throws {
+        let (windows, _) = UsageLimits.parseClaudeUsage(Self.claudeUsageJSON)
+
+        #expect(windows.map(\.name) == ["5 小时", "7 天"])
+        #expect(windows.map(\.percent) == [19.0, 34.0])
+
+        let fiveHour = try #require(windows.first)
+        let resets = try #require(fiveHour.resetsAt)
+        // 2026-07-26T14:49:59.679695Z —— 带小数秒，普通 ISO8601 解析器会在这儿栽跟头。
+        #expect(abs(resets.timeIntervalSince1970 - 1785077399.679) < 1)
+    }
+
+    @Test("额外用量按 decimal_places 换算成通常写的那个数")
+    func parsesExtraSpend() throws {
+        let (_, spend) = UsageLimits.parseClaudeUsage(Self.claudeUsageJSON)
+
+        let spend2 = try #require(spend)
+        #expect(spend2.used == 30.72)   // 3072 分
+        #expect(spend2.limit == 100)    // 10000 分
+        #expect(spend2.currency == "AUD")
+    }
+
+    @Test("额外用量没开时就不显示，不是显示成零")
+    func skipsDisabledExtraSpend() {
+        let json = #"{"extra_usage":{"is_enabled":false,"monthly_limit":10000,"used_credits":0.0,"utilization":0.0}}"#
+        let (_, spend) = UsageLimits.parseClaudeUsage(json.data(using: .utf8)!)
+        #expect(spend == nil)
+    }
+
+    @Test("返回是空的或坏的，解析不炸，只是什么也没有")
+    func survivesGarbage() {
+        for bad in ["", "{}", "not json at all", #"{"five_hour":null}"#] {
+            let (windows, spend) = UsageLimits.parseClaudeUsage(bad.data(using: .utf8)!)
+            #expect(windows.isEmpty)
+            #expect(spend == nil)
+        }
+    }
+
+    @Test("窗口长度说成人话")
+    func namesWindows() {
+        #expect(UsageLimits.windowName(minutes: 300) == "5 小时")
+        #expect(UsageLimits.windowName(minutes: 10080) == "7 天")
+        #expect(UsageLimits.windowName(minutes: 45) == "45 分钟")
+    }
+
+    @Test("四种 token 都算进总量 —— 缓存那两项曾经被漏掉")
+    func totalCountsCacheTokens() {
+        let usage = ToolUsage(sessions: 1, input: 2, output: 524,
+                              cacheWrite: 798, cacheRead: 214_421)
+        #expect(usage.total == 215_745)
+        // 只加 input+output 的老口径会得出 526 —— 差了四百倍。
+        #expect(usage.total != usage.input + usage.output)
+    }
+
+    @Test("还有多久重置，说到分钟；已经过了就什么也不说")
+    func describesReset() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func window(after seconds: TimeInterval) -> UsageWindow {
+            UsageWindow(name: "5 小时", percent: 19, resetsAt: now.addingTimeInterval(seconds))
+        }
+        #expect(window(after: 30 * 60).resetText(from: now) == "30 分钟后重置")
+        #expect(window(after: 2 * 3600).resetText(from: now) == "2 小时后重置")
+        #expect(window(after: 2 * 3600 + 14 * 60).resetText(from: now) == "2 小时 14 分后重置")
+        // 已经过去的重置时刻说明数据陈旧，那时不如闭嘴。
+        #expect(window(after: -60).resetText(from: now) == nil)
+    }
+
+    @Test("百分比写成整数，但小于 1% 时不写成 0")
+    func formatsPercent() {
+        #expect(19.0.percentString == "19%")
+        #expect(0.4.percentString == "<1%")
+        #expect(0.0.percentString == "0%")
+    }
+}
