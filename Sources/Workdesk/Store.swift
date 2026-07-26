@@ -59,6 +59,60 @@ final class Store {
         categories.first { $0.id == id }
     }
 
+    /// 改名。空白名字不改 —— 与 `addCategory` 同一副脾气：分类总得有个名字。
+    /// 名字只是称呼，改它碰不到分类的身份，里头的待办一条也不动。
+    func renameCategory(_ id: Category.ID, to name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        updateCategory(id) { $0.name = n }
+    }
+
+    /// 换颜色。新建时颜色是自动分配的，这里是唯一由用户指定颜色的入口。
+    /// 不拦重色 —— 两个分类撞色是用户自己的选择，不该被拦下。
+    func recolorCategory(_ id: Category.ID, to color: CategoryColor) {
+        updateCategory(id) { $0.color = color }
+    }
+
+    /// 把一个分类挪到另一个分类现在的位置上，其余的依次让开 ——
+    /// tab 栏上拖着一个 tab 放到另一个 tab 上时走这条路，于是最常用的可以排到前头。
+    /// 说的是「放到谁身上」而不是第几位：顺序是 `Store` 的事，视图层不必先去数位置。
+    /// 两个都是同一个分类、或者哪一个不存在，都什么也不发生。
+    func moveCategory(_ id: Category.ID, onto targetID: Category.ID) {
+        guard let from = categories.firstIndex(where: { $0.id == id }),
+              let to = categories.firstIndex(where: { $0.id == targetID }), from != to else { return }
+        categories.insert(categories.remove(at: from), at: to)
+        saveCategories()
+    }
+
+    /// 除了这一个之外的分类。待办的「移到分类」菜单列的就是它们 ——
+    /// 一条待办没法移到它已经在的地方。
+    func categories(besides categoryID: Category.ID) -> [Category] {
+        categories.filter { $0.id != categoryID }
+    }
+
+    /// 删掉一个分类。**只删得掉空的** —— 里头还有待办（无论完成与否）就拒绝，
+    /// 一条待办也不动。删除没有撤销、没有回收站，所以宁可在这儿拦住，
+    /// 也不要连带无声地丢掉一批待办。这条约束由 `Store` 保证，不依赖视图层自觉。
+    ///
+    /// 疏通的路子是 `moveTodo(_:to:)` 或删掉那些待办：分类空了，它自然就删得掉了。
+    /// 删到一个不剩是允许的 —— 那时主线回到引导空态，与首次启动是同一个状态。
+    @discardableResult
+    func deleteCategory(_ id: Category.ID) -> CategoryDeletion {
+        guard categories.contains(where: { $0.id == id }) else { return .noSuchCategory }
+        let mine = todos(in: id)
+        guard mine.isEmpty else { return .refused(todoCount: mine.count) }
+        categories.removeAll { $0.id == id }
+        saveCategories()
+        return .deleted
+    }
+
+    /// 改一个分类并落盘。找不着就什么也不发生 —— 与 `update(_:_:)` 同一副脾气。
+    private func updateCategory(_ id: Category.ID, _ change: (inout Category) -> Void) {
+        guard let i = categories.firstIndex(where: { $0.id == id }) else { return }
+        change(&categories[i])
+        saveCategories()
+    }
+
     // MARK: - 记事的分类
 
     /// 沙漏视图记事时归到哪个分类：上次选的那个。还没选过、或选的那个分类没了，
@@ -186,6 +240,16 @@ final class Store {
     /// 「总得做但不急」的事就该一直待在这儿。
     func clearPlannedDay(_ item: TodoItem) {
         update(item.id) { $0.plannedOn = nil }
+    }
+
+    /// 把一条待办改到另一个分类。归类的想法会变，事情该能换地方；这也是把一个分类腾空的那条路 ——
+    /// 非空分类删不掉，没有它就永远删不掉。
+    ///
+    /// 只改归属：计划日、创建日、完成日与完成状态都不因换分类而变 —— 横轴上的移动不碰纵轴。
+    /// 目标分类不存在时什么也不发生，于是「每条待办都落在某个分类里」这条约束在这儿也守得住。
+    func moveTodo(_ item: TodoItem, to categoryID: Category.ID) {
+        guard categories.contains(where: { $0.id == categoryID }) else { return }
+        update(item.id) { $0.categoryID = categoryID }
     }
 
     func deleteTodo(_ item: TodoItem) {

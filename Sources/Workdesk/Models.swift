@@ -31,6 +31,16 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var plannedOn: Date?
 }
 
+/// 一次删除分类请求的下场。删不掉有两种，说清楚是哪一种 ——
+/// 视图层照着它决定要不要提示，而那句提示要说的数字也一并带回来，不必让它自己去数一遍。
+enum CategoryDeletion: Equatable {
+    case deleted
+    /// 里头还有这么多条待办（无论完成与否），所以没删，一条也没动。
+    case refused(todoCount: Int)
+    /// 根本没这个分类。什么也没发生，也没什么好提示的。
+    case noSuchCategory
+}
+
 /// 分类视图里左右两列的内容：左边待完成，右边已完成。
 /// 排序在 `Store` 里定死，这里只是分好的一份结果 —— 视图层照着铺就是，不自行排序。
 struct CategoryColumns: Equatable {

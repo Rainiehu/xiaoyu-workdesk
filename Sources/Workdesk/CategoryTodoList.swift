@@ -130,8 +130,10 @@ struct CategoryTodoList: View {
     }
 }
 
-/// 一行待办：左边的圆圈打勾/取消，悬停时右边浮出删除。
+/// 一行待办：左边的圆圈打勾/取消，悬停时右边浮出删除，右键可以把它移到别的分类。
 /// 已完成的不带删除线 —— 完成的事情读起来该仍然清晰体面。淡化交给所在那一列，行本身不管。
+///
+/// 改分类的入口只在这儿，不在沙漏视图的轴上：归属是横轴上的事，只在分类视图里定。
 private struct TodoRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
@@ -185,5 +187,25 @@ private struct TodoRow: View {
                 .fill(hovering ? AnyShapeStyle(.quaternary.opacity(0.35)) : AnyShapeStyle(.clear))
         )
         .onHover { hovering = $0 }
+        .contextMenu { moveMenu }
+    }
+
+    /// 「移到分类」：列出别的分类，选一个这条待办就归到那儿去。
+    /// 移走只改归属 —— 计划日、创建日、完成日与完成状态都不变，这条由 `Store` 保证。
+    /// 它同时是腾空一个分类的那条路：非空分类删不掉，没有它就永远删不掉。
+    @ViewBuilder
+    private var moveMenu: some View {
+        let others = store.categories(besides: todo.categoryID)
+        if others.isEmpty {
+            // 只有这一个分类时无处可移。菜单项照样在，只是灰着 —— 免得右键之后空空如也。
+            Button("移到分类") {}
+                .disabled(true)
+        } else {
+            Menu("移到分类") {
+                ForEach(others) { category in
+                    Button(category.name) { store.moveTodo(todo, to: category.id) }
+                }
+            }
+        }
     }
 }
