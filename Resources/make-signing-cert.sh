@@ -36,11 +36,17 @@ EOF
 openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
     -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/openssl.cnf" 2>/dev/null
 
-openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-    -out "$TMP/bundle.p12" -passout pass: -name "$NAME" 2>/dev/null
+# OpenSSL 3 默认用 AES-256 + SHA-256 打包 PKCS12，而 macOS 的 security 读不了那种，
+# 会报「MAC verification failed」。-legacy 换回它认得的老算法；系统自带的 LibreSSL
+# 本来就只会老算法、也不认这个参数，所以两种都试一遍。
+PASS=workdesk
+openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+    -out "$TMP/bundle.p12" -passout "pass:$PASS" -name "$NAME" 2>/dev/null \
+|| openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+    -out "$TMP/bundle.p12" -passout "pass:$PASS" -name "$NAME" 2>/dev/null
 
 # -T /usr/bin/codesign：让 codesign 用这把私钥时不必每次弹窗问你要密码。
-security import "$TMP/bundle.p12" -k "$KEYCHAIN" -P "" -T /usr/bin/codesign
+security import "$TMP/bundle.p12" -k "$KEYCHAIN" -P "$PASS" -T /usr/bin/codesign
 
 # 信任它用于代码签名。这一步会问一次你的登录密码。
 echo "接下来要把证书标成「代码签名可信」，系统会问一次你的登录密码："
