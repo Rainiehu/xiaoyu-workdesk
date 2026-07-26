@@ -11,8 +11,23 @@ set -e
 NAME="Workdesk Local Signing"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
+# 私钥默认是「每次使用前需确认」，于是每次 codesign 都会弹框把构建挂住。
+# 这一步把它改成免确认。证书已经在的时候也跑，好让上一版建的证书能被修好。
+allow_codesign_without_prompt() {
+    echo "要把私钥设成「codesign 使用时不再确认」，请输入你的登录密码（不会存下来）："
+    read -rs PW
+    echo
+    if security set-key-partition-list -S apple-tool:,apple: -s -k "$PW" "$KEYCHAIN" >/dev/null 2>&1; then
+        echo "✓ 以后 codesign 不会再弹框"
+    else
+        echo "✗ 没设成。构建仍能出产物（会退回 ad-hoc 签名），只是证书用不上。"
+    fi
+    unset PW
+}
+
 if security find-identity -v -p codesigning | grep -q "$NAME"; then
-    echo "✓ 「$NAME」已经存在，不用再建"
+    echo "✓ 「$NAME」已经存在"
+    allow_codesign_without_prompt
     exit 0
 fi
 
@@ -54,6 +69,7 @@ security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" "$TMP/cert.pem
 
 echo
 if security find-identity -v -p codesigning | grep -q "$NAME"; then
+    allow_codesign_without_prompt
     echo "✓ 建好了。下次 ./build.sh 就会用它签名，签名从此稳定。"
 else
     echo "✗ 证书建了但 codesign 还不认它，build.sh 会退回 ad-hoc 签名。"

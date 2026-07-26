@@ -87,6 +87,33 @@ struct UsageTests {
         #expect(window(after: -60).resetText(from: now) == nil)
     }
 
+    @Test("被限流就翻倍退避，到封顶为止；一次成功就回到常规节奏")
+    func backsOffWhenRateLimited() {
+        let normal = Store.usageLimitsInterval
+
+        // 第一次被挡，从常规间隔起步，之后每次翻倍。
+        var backoff = Store.nextBackoff(from: 0, rateLimited: true)
+        #expect(backoff == normal)
+        backoff = Store.nextBackoff(from: backoff, rateLimited: true)
+        #expect(backoff == normal * 2)
+        backoff = Store.nextBackoff(from: backoff, rateLimited: true)
+        #expect(backoff == normal * 4)
+
+        // 一直被挡也不会无限往上涨 —— 封顶多少是可以调的，「有个顶」才是这条测的东西。
+        for _ in 0..<20 { backoff = Store.nextBackoff(from: backoff, rateLimited: true) }
+        let capped = backoff
+        #expect(Store.nextBackoff(from: capped, rateLimited: true) == capped)
+        #expect(capped >= normal)
+
+        // 成功一次就清零 —— 下次仍按常规间隔，不带着上次的惩罚。
+        #expect(Store.nextBackoff(from: backoff, rateLimited: false) == 0)
+    }
+
+    @Test("接口的节奏比本地扫描慢得多 —— 每分钟问一次真的会被 429")
+    func limitsIntervalIsSlowerThanScan() {
+        #expect(Store.usageLimitsInterval > Store.usageRefreshInterval)
+    }
+
     @Test("百分比写成整数，但小于 1% 时不写成 0")
     func formatsPercent() {
         #expect(19.0.percentString == "19%")
