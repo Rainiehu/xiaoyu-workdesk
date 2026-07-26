@@ -289,13 +289,29 @@ final class Store {
 
     // MARK: - Usage
 
+    /// 多久重扫一次。限流窗口以小时计，一分钟远够用了；扫描在后台线程，界面不等它。
+    static let usageRefreshInterval: TimeInterval = 60
+
     func refreshUsage() {
         guard !usageLoading else { return }
         usageLoading = true
         Task.detached(priority: .utility) {
-            let snapshot = UsageScanner.scan()
+            // 本地日志说「用了多少」，接口说「还剩多少」。两件事互不依赖 ——
+            // 先把请求发出去，再扫本地日志，等回来时扫描往往已经做完了。
+            async let limits = ClaudeUsageAPI.fetch()
+            let local = UsageScanner.scan()
+            let claude = await limits
+
+            var snapshot = UsageSnapshot()
+            snapshot.claude = local.claude
+            snapshot.codex = local.codex
+            snapshot.codexWindows = local.codexWindows
+            snapshot.claudeWindows = claude.windows
+            snapshot.extraSpend = claude.spend
+            snapshot.claudeLimitsProblem = claude.problem
+            let final = snapshot
             await MainActor.run {
-                self.usage = snapshot
+                self.usage = final
                 self.usageLoading = false
             }
         }
