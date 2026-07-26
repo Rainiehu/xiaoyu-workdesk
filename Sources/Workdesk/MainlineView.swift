@@ -85,6 +85,28 @@ struct MainlineTabBar: View {
     let select: (MainlineTab) -> Void
 
     var body: some View {
+        HStack(spacing: 0) {
+            tabs
+            motto
+        }
+    }
+
+    /// 钉在 tab 栏右端的一句话。放在可滚动区外面 —— 分类再多、横着滚起来，它也留在原处。
+    ///
+    /// 它只是一句话，不是控件：没有底、不接受点击、也没有悬停态。字号最小、颜色最淡、
+    /// 字距拉开一点，于是它读起来像墙上贴的一张纸，而不是一个还没点过的按钮。
+    private var motto: some View {
+        Text("无视中断")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            .tracking(2)
+            // 不许被压缩：窗口窄了该让 tab 那边先滚，而不是把这句话挤成省略号。
+            .fixedSize()
+            .padding(.trailing, 20)
+            .accessibilityHidden(true)
+    }
+
+    private var tabs: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 HourglassTab(isSelected: selected == .hourglass) { select(.hourglass) }
