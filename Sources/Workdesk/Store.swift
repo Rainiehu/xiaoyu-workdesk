@@ -289,16 +289,38 @@ final class Store {
 
     // MARK: - Usage
 
-    /// 多久重扫一次。限流窗口以小时计，一分钟远够用了；扫描在后台线程，界面不等它。
-    static let usageRefreshInterval: TimeInterval = 60
+    /// 本地日志多久重扫一次。读几个文件而已，不花什么，一分钟一次。
+    nonisolated static let usageRefreshInterval: TimeInterval = 60
 
-    func refreshUsage() {
+    /// 限流接口多久调一次。刻意比扫描慢得多：5 小时的窗口最快也就涨 0.33%/分钟，
+    /// 一刻钟问一次，两次之间最多动 5%，看这种数字足够了。
+    ///
+    /// 更要紧的是对方的配额很小 —— 早前按一分钟一次打，很快就被 429，而且罚时不短。
+    /// 这个数字是拿罚单换来的，别再往下调。
+    nonisolated static let usageLimitsInterval: TimeInterval = 900
+
+    /// 被 429 之后退避到多久。翻倍增长，到这儿封顶。
+    nonisolated private static let usageLimitsBackoffCap: TimeInterval = 3600
+
+    /// 下次最早什么时候可以再调那个接口。
+    private var limitsNextFetch = Date.distantPast
+    private var limitsBackoff: TimeInterval = 0
+
+    /// - Parameter force: 手动点刷新时为真，越过接口自己的节奏立刻问一次 ——
+    ///   人点了按钮却什么都不动，比多发一次请求更糟。定时刷新不走这条路。
+    func refreshUsage(force: Bool = false) {
         guard !usageLoading else { return }
         usageLoading = true
+        // 接口有它自己的节奏，跟本地扫描分开 —— 扫描每分钟一次，它五分钟一次，被限流还要再退。
+        let shouldFetchLimits = force || Date.now >= limitsNextFetch
+        // 上一次拿到的限流数据。这次没拿到就接着用它 ——
+        // 一次网络抖动不该把卡片上已有的东西擦成一行报错。
+        let previous = usage
+
         Task.detached(priority: .utility) {
             // 本地日志说「用了多少」，接口说「还剩多少」。两件事互不依赖 ——
             // 先把请求发出去，再扫本地日志，等回来时扫描往往已经做完了。
-            async let limits = ClaudeUsageAPI.fetch()
+            async let limits = shouldFetchLimits ? ClaudeUsageAPI.fetch() : nil
             let local = UsageScanner.scan()
             let claude = await limits
 
@@ -306,15 +328,41 @@ final class Store {
             snapshot.claude = local.claude
             snapshot.codex = local.codex
             snapshot.codexWindows = local.codexWindows
-            snapshot.claudeWindows = claude.windows
-            snapshot.extraSpend = claude.spend
-            snapshot.claudeLimitsProblem = claude.problem
+
+            if let claude, !claude.windows.isEmpty {
+                snapshot.claudeWindows = claude.windows
+                snapshot.extraSpend = claude.spend
+            } else {
+                // 没去问，或者问了没拿到 —— 两种情况都接着显示上次那份。
+                snapshot.claudeWindows = previous?.claudeWindows ?? []
+                snapshot.extraSpend = previous?.extraSpend
+                // 只有一份都没有的时候才把原因说出来；有旧数据时报错反而是噪音。
+                if snapshot.claudeWindows.isEmpty {
+                    snapshot.claudeLimitsProblem = claude?.problem ?? previous?.claudeLimitsProblem
+                }
+            }
+
             let final = snapshot
+            let outcome = claude
             await MainActor.run {
                 self.usage = final
                 self.usageLoading = false
+                if let outcome { self.scheduleNextLimitsFetch(after: outcome) }
             }
         }
+    }
+
+    /// 定下次什么时候再问那个接口。拿到了就回到常规节奏；被限流就翻倍退避，到半小时封顶。
+    /// 退避是必须的 —— 被 429 之后继续按原节奏硬打，只会一直 429 下去。
+    private func scheduleNextLimitsFetch(after result: ClaudeUsageAPI.Result) {
+        limitsBackoff = Self.nextBackoff(from: limitsBackoff, rateLimited: result.isRateLimited)
+        limitsNextFetch = .now.addingTimeInterval(max(limitsBackoff, Self.usageLimitsInterval))
+    }
+
+    /// 下一次的退避时长。被挡就翻倍（从常规间隔起步），到封顶为止；一旦成功就清零回常规节奏。
+    nonisolated static func nextBackoff(from current: TimeInterval, rateLimited: Bool) -> TimeInterval {
+        guard rateLimited else { return 0 }
+        return min(max(current * 2, usageLimitsInterval), usageLimitsBackoffCap)
     }
 
     // MARK: - Persistence

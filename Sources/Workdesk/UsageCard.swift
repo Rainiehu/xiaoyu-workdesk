@@ -50,13 +50,14 @@ struct UsageCard: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
-            Button { store.refreshUsage() } label: {
+            // 手动点就是要它现在去问，越过接口自己那套节奏。
+            Button { store.refreshUsage(force: true) } label: {
                 Image(systemName: "arrow.clockwise").font(.caption2)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .disabled(store.usageLoading)
-            .help("立刻重新扫描")
+            .help("立刻重新扫描并查限流")
         }
     }
 

@@ -59,10 +59,26 @@ EOF
 # 没有就退回 ad-hoc —— app 照样能跑，只是每次重建都会被系统当成一个新程序。
 # 那张证书由 Resources/make-signing-cert.sh 建，只需跑一次。
 IDENTITY="Workdesk Local Signing"
+sign_adhoc() { codesign --force -s - "$APP" >/dev/null 2>&1; }
+
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
-    codesign --force -s "$IDENTITY" "$APP" >/dev/null 2>&1
+    # 限时 15 秒。私钥若被设成「使用前需确认」，codesign 会弹框然后一直等下去 ——
+    # 构建脚本不该挂在一个没人看见的对话框上，超时就退回 ad-hoc，照样出得来产物。
+    codesign --force -s "$IDENTITY" "$APP" >/dev/null 2>&1 &
+    signer=$!
+    ( sleep 15; kill -TERM $signer 2>/dev/null ) 2>/dev/null &
+    killer=$!
+    # 这两句都可能返回非零（签名被掐、计时器已自己退出），而脚本开头是 set -e ——
+    # 不兜住的话它会在这儿默默退出，产物看着像没构建完。
+    if wait $signer 2>/dev/null; then status=0; else status=$?; fi
+    kill $killer 2>/dev/null || true
+    if [ $status -ne 0 ]; then
+        sign_adhoc
+        echo "注意：用证书签名没成（多半是私钥要求每次确认），已退回 ad-hoc 签名。"
+        echo "      跑一次 ./Resources/make-signing-cert.sh 可以把它修好。"
+    fi
 else
-    codesign --force -s - "$APP" >/dev/null 2>&1
+    sign_adhoc
 fi
 
 echo "Built: $APP"

@@ -15,6 +15,8 @@ enum ClaudeUsageAPI {
         var spend: ExtraSpend?
         /// 没拿到时说明为什么。说出来比让卡片默默空着强。
         var problem: String?
+        /// 被限流了。调用方据此退避 —— 接着按原节奏问只会一直被挡在门外。
+        var isRateLimited = false
     }
 
     static func fetch() async -> Result {
@@ -32,6 +34,8 @@ enum ClaudeUsageAPI {
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             // token 是 Claude Code 在维护的，过期了得它去续 —— 这里只能说清楚，不能代劳。
             if code == 401 { return Result(problem: "凭证已过期，在 Claude Code 里重新登录即可") }
+            // 这个接口问太勤会被挡。响应里的 retry-after 给的是 0，不足为凭，退避多久由调用方定。
+            if code == 429 { return Result(problem: "问得太勤，稍后自动重试", isRateLimited: true) }
             guard code == 200 else { return Result(problem: "接口返回 \(code)") }
             let parsed = UsageLimits.parseClaudeUsage(data)
             return Result(windows: parsed.windows, spend: parsed.spend)
