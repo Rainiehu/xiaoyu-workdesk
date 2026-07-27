@@ -114,6 +114,31 @@ struct UsageTests {
         #expect(Store.usageLimitsInterval > Store.usageRefreshInterval)
     }
 
+    @Test("「今日」按本地的今天算，不是 UTC 的今天")
+    func todayIsLocal() {
+        let now = Date.now
+        let start = UsageScanner.todayStart(now: now)
+
+        // 本地零点：和 Calendar 说的同一刻。UTC+10 那边这跟 UTC 零点差十个小时，
+        // 早前按 UTC 筛，本地 00:00–10:00 干的活就整个丢了。
+        #expect(start == Calendar.current.startOfDay(for: now))
+        #expect(start <= now)
+        #expect(now.timeIntervalSince(start) < 24 * 3600)
+    }
+
+    @Test("时间戳写成日志里那种定长 UTC 格式，好按字典序比")
+    func formatsTimestampLikeTheLogs() {
+        // 日志里长这样：2026-07-27T12:49:23.654Z
+        let s = UsageScanner.timestampString(Date(timeIntervalSince1970: 1_785_156_563.654))
+        #expect(s.hasSuffix("Z"))
+        #expect(s.count == "2026-07-27T12:49:23.654Z".count)
+
+        // 定长同格式，所以字典序就是时间序 —— 筛选靠这条成立，不必逐行解析日期。
+        let earlier = UsageScanner.timestampString(Date(timeIntervalSince1970: 1_785_100_000))
+        let later = UsageScanner.timestampString(Date(timeIntervalSince1970: 1_785_200_000))
+        #expect(earlier < later)
+    }
+
     @Test("百分比写成整数，但小于 1% 时不写成 0")
     func formatsPercent() {
         #expect(19.0.percentString == "19%")
