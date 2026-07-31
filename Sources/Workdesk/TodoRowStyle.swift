@@ -9,6 +9,9 @@ import SwiftUI
 /// 差别只在「哪几格是空的」：分类视图不画 tag（在哪个分类里是不言自明的），未排期列的 tag
 /// 在组头上，轴上的位置本身就是计划日、于是没有排期入口。顺序与度量都定在这儿，三处照着来 ——
 /// 先前没有这么一处共同的定义，三行才各自漂移成了三副模样。
+///
+/// 行上能做的事也一样：打勾、删除、就地改写、移到分类，在哪一列都是同一套，见 ADR-0003。
+/// 改写那点状态与「移到分类」那个菜单因此也收在这儿 —— 三份抄写迟早会漂成三副脾气。
 
 /// 一行待办的度量。三处共用，改一处三处一起动。
 enum TodoRowLayout {
@@ -78,7 +81,100 @@ struct TodoDragPreview: View {
     }
 }
 
+/// 一行待办正在改写时的那点状态：改不改、改成什么。
+///
+/// 两样东西绑在一起，是因为「开始改写」必须一步完成：草稿先装上原文，同一下才翻成改写中 ——
+/// 分两步走的话输入框会先空着闪一帧。
+struct TodoEditing {
+    private(set) var active = false
+    var draft = ""
+
+    /// 拿现在的正文当草稿，人于是接着改，而不是从空白重打一遍。
+    mutating func begin(_ todo: TodoItem) {
+        draft = todo.text
+        active = true
+    }
+
+    mutating func end() {
+        active = false
+    }
+}
+
+/// 一行待办的正文。平时是一行字，改写时就地变成输入框 —— 改写发生在原位，不弹窗、不跳转。
+///
+/// 三处共用。字号不在这儿定：宽列用 body、窄列用 callout，由所在那一列外面罩上去，
+/// `Text` 和 `TextField` 因此一起跟着变，两种模样的字不会差一号。
+struct TodoText: View {
+    @Environment(Store.self) private var store
+    let todo: TodoItem
+    @Binding var editing: TodoEditing
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        if editing.active {
+            TextField("", text: $editing.draft)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onSubmit(commit)
+                // Esc 放弃这次改写，原文一字不动。
+                .onExitCommand { editing.end() }
+                // 点到别处去了也算改完 —— 一次改写没有「没保存」这个下场。
+                .onChange(of: focused) { _, focused in if !focused { commit() } }
+                .onAppear { focused = true }
+        } else {
+            Text(todo.text)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路。
+    private func commit() {
+        guard editing.active else { return }
+        editing.end()
+        store.editTodo(todo, to: editing.draft)
+    }
+}
+
+/// 「移到分类」：列出别的分类，选一个这条待办就归到那儿去。
+/// 移走只改归属 —— 计划日、创建日、完成日与完成状态都不变，这条由 `Store` 保证。
+/// 它同时是腾空一个分类的那条路：非空分类删不掉，没有它就永远删不掉。
+struct TodoMoveMenu: View {
+    @Environment(Store.self) private var store
+    let todo: TodoItem
+
+    var body: some View {
+        let others = store.categories(besides: todo.categoryID)
+        if others.isEmpty {
+            // 只有这一个分类时无处可移。菜单项照样在，只是灰着 —— 免得右键之后空空如也。
+            Button("移到分类") {}
+                .disabled(true)
+        } else {
+            Menu("移到分类") {
+                ForEach(others) { category in
+                    Button(category.name) { store.moveTodo(todo, to: category.id) }
+                }
+            }
+        }
+    }
+}
+
 extension View {
+    /// 行上那两个编辑入口：单击整行进就地改写，右键是同样这两件事的菜单。
+    /// 三处一模一样 —— 一行待办能做什么，不看它在哪一列，见 ADR-0003。
+    ///
+    /// 单击接的是整行，不只是正文那几个字：行里的圈、日期、删除都是按钮，各自先接住自己的那一下，
+    /// 不会落到这儿来。所以要摆在 `contentShape` 之后、`draggable` 之前，与整行抓得动那件事排好先后。
+    func todoRowEditing(_ todo: TodoItem, editing: Binding<TodoEditing>) -> some View {
+        contextMenu {
+            Button("改写") { editing.wrappedValue.begin(todo) }
+            TodoMoveMenu(todo: todo)
+        }
+        .onTapGesture {
+            if !editing.wrappedValue.active { editing.wrappedValue.begin(todo) }
+        }
+    }
+
     /// 一行待办的内缩与悬停底色。三处都要那块底色 —— 行上摆着打勾和删除、整行还抓得动，
     /// 手落在哪一行必须当场看得见。
     func todoRowChrome(hovering: Bool) -> some View {

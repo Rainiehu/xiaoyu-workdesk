@@ -16,6 +16,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @Environment(Store.self) private var store
+    @Environment(TodayClock.self) private var clock
     @State private var selection: SidebarSection? = .mainline
 
     var body: some View {
@@ -42,6 +43,9 @@ struct ContentView: View {
             case .favorites: FavoritesView()
             }
         }
+        // 「今天」从这儿开始一直守着，直到界面消失 —— 挂在最外层而不是沙漏视图上：
+        // 眼下开着的是哪一屏跟日子过没过天无关，切到收藏流去也不该把它停掉。
+        .task { await clock.watch() }
     }
 
     private func badge(for section: SidebarSection) -> Int {

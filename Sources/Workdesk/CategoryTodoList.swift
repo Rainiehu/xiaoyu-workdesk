@@ -130,23 +130,23 @@ struct CategoryTodoList: View {
     }
 }
 
-/// 一行待办：左边的圆圈打勾/取消，悬停时右边浮出删除，双击正文就地改写，
+/// 一行待办：左边的圆圈打勾/取消，悬停时右边浮出删除，单击整行就地改写，
 /// 右键是同样这两件事的菜单入口。已完成的不带删除线 —— 完成的事情读起来该仍然清晰体面。
 /// 淡化交给所在那一列，行本身不管。
 ///
 /// 整行抓得动，落在哪儿就是哪件事：落在左列另一行上是换位置，落在 tab 栏某个分类上是改归属。
-/// 改分类与改写正文的入口都只在这儿，不在沙漏视图的轴上：轴上只看得见事情排在哪天。
+/// 这些本事轴上和未排期列的行也都有，见 ADR-0003；只有「换位置」是这一列独有的，
+/// 因为位置只在一个分类里可比。
 private struct TodoRow: View {
     @Environment(Store.self) private var store
+    @Environment(TodayClock.self) private var clock
     let todo: TodoItem
     let tint: Color
     @State private var hovering = false
 
     /// 正在就地改写这一行。改写时整行变成一个输入框，别的按钮让开 ——
     /// 手正放在字上，旁边不该还浮着一个删除。
-    @State private var editing = false
-    @State private var draft = ""
-    @FocusState private var editorFocused: Bool
+    @State private var editing = TodoEditing()
 
     /// 有另一行正悬在这一行上方。松手它就落到这一行的位置上。
     @State private var targeted = false
@@ -158,7 +158,7 @@ private struct TodoRow: View {
         HStack(spacing: TodoRowLayout.spacing) {
             TodoToggle(done: todo.done, tint: tint) { store.toggleTodo(todo) }
 
-            text
+            TodoText(todo: todo, editing: $editing)
 
             Spacer(minLength: 8)
 
@@ -166,7 +166,7 @@ private struct TodoRow: View {
             // 排期入口留给还没做的事：做完了再改期没有意义，真要改，取消打勾就回到左列。
             // 有完成日就等于完成了，这条由 `Store` 保证，所以这儿只问一次。
             if let completedAt = todo.completedAt {
-                Text(completedAt.dayLabel)
+                Text(completedAt.dayLabel(relativeTo: clock.today))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -174,7 +174,7 @@ private struct TodoRow: View {
             }
 
             // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
-            if hovering && !editing {
+            if hovering && !editing.active {
                 TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
             }
         }
@@ -185,16 +185,10 @@ private struct TodoRow: View {
                 .strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2)
         )
         .onHover { hovering = $0 }
-        .contextMenu {
-            Button("改写") { beginEditing() }
-            moveMenu
-        }
         // 整行都抓得动，内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         // 已完成的也抓得动 —— 它排不了序，但照样可以拖到 tab 栏上换分类。
         .contentShape(Rectangle())
-        // 点这一行就进改写 —— 正文那几个字不是唯一的入口，行里的空处点下去是同一件事。
-        // 圈、日期、删除都是按钮，各自先接住自己的那一下，不会落到这儿来。
-        .onTapGesture { if !editing { beginEditing() } }
+        .todoRowEditing(todo, editing: $editing)
         .draggable(DraggedTodo(id: todo.id)) { TodoDragPreview(text: todo.text, tint: tint) }
         .dropDestination(for: DraggedTodo.self) { dropped, _ in
             // 一次拖一条 —— 这列没有多选，落下的就只会是刚才抓起的那一行。
@@ -204,58 +198,4 @@ private struct TodoRow: View {
         .animation(.easeOut(duration: 0.12), value: targeted)
     }
 
-    /// 正文。平时是一行字，点整行就地变成输入框 —— 改写发生在原位，不弹窗、不跳转。
-    @ViewBuilder
-    private var text: some View {
-        if editing {
-            TextField("", text: $draft)
-                .textFieldStyle(.plain)
-                .focused($editorFocused)
-                .onSubmit(commit)
-                // Esc 放弃这次改写，原文一字不动。
-                .onExitCommand(perform: cancel)
-                // 点到别处去了也算改完 —— 一次改写没有「没保存」这个下场。
-                .onChange(of: editorFocused) { _, focused in if !focused { commit() } }
-                .onAppear { editorFocused = true }
-        } else {
-            Text(todo.text)
-                .multilineTextAlignment(.leading)
-        }
-    }
-
-    /// 开始改写：拿现在的正文当草稿，人于是接着改，而不是从空白重打一遍。
-    private func beginEditing() {
-        draft = todo.text
-        editing = true
-    }
-
-    /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路。
-    private func commit() {
-        guard editing else { return }
-        editing = false
-        store.editTodo(todo, to: draft)
-    }
-
-    private func cancel() {
-        editing = false
-    }
-
-    /// 「移到分类」：列出别的分类，选一个这条待办就归到那儿去。
-    /// 移走只改归属 —— 计划日、创建日、完成日与完成状态都不变，这条由 `Store` 保证。
-    /// 它同时是腾空一个分类的那条路：非空分类删不掉，没有它就永远删不掉。
-    @ViewBuilder
-    private var moveMenu: some View {
-        let others = store.categories(besides: todo.categoryID)
-        if others.isEmpty {
-            // 只有这一个分类时无处可移。菜单项照样在，只是灰着 —— 免得右键之后空空如也。
-            Button("移到分类") {}
-                .disabled(true)
-        } else {
-            Menu("移到分类") {
-                ForEach(others) { category in
-                    Button(category.name) { store.moveTodo(todo, to: category.id) }
-                }
-            }
-        }
-    }
 }

@@ -20,6 +20,7 @@ import SwiftUI
 /// 「过期」这个概念不存在，见 ADR-0001。要给它加提醒之前请先读那份 ADR。
 struct HourglassView: View {
     @Environment(Store.self) private var store
+    @Environment(TodayClock.self) private var clock
 
     @State private var draft = ""
     @FocusState private var inputFocused: Bool
@@ -30,9 +31,9 @@ struct HourglassView: View {
     private let contentInset: CGFloat = 28
 
     var body: some View {
-        // 「今天」每次渲染问一次，整条轴都跟着这一个值：锚点、强调、日期写法因此永远一致，
-        // 而跨过零点之后的下一次渲染会自己跟上，不像存进 @State 那样一直停在昨天。
-        let today = Date.now
+        // 「今天」不在这儿问时钟，从 `TodayClock` 取 —— 整条主线共用那一个值：锚点、强调、
+        // 日期写法、回车记在哪一天因此永远一致，跨过零点它自己会跟上，不必等谁来叫醒。
+        let today = clock.today
 
         return HStack(alignment: .top, spacing: 0) {
             VStack(spacing: 0) {
@@ -73,6 +74,14 @@ struct HourglassView: View {
             .onAppear {
                 // 落在中间而不是顶上：过去与未来因此同时露在眼前，两头都摆明了可以滚。
                 proxy.scrollTo(today.dayStart, anchor: .center)
+            }
+            // 过了一天就重新锚回今天，跟刚打开一样 —— 这台窗口常常一开就是几天，
+            // 隔夜回来时停在昨天那一屏，看到的就是一份对不上的安排。
+            // `today` 只在日子变了时才动（见 `TodayClock`），所以这句不会被时刻的走动惊动。
+            .onChange(of: today) { _, now in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo(now.dayStart, anchor: .center)
+                }
             }
         }
     }
@@ -213,31 +222,36 @@ private struct DayGroup: View {
 }
 
 /// 轴上的一行待办：打勾的圈、正文、所属分类的 tag（这儿是光板的：没有胶囊、不着色），已完成的再附一句实际完成日。
-/// 圈点得动、悬停时右边浮出删除，整行还可以拖到别的日期分组里去改期。
+/// 圈点得动、悬停时右边浮出删除、单击整行就地改写、右键还有「改写」与「移到分类」，
+/// 整行可以拖到别的日期分组里去改期，也可以拖到 tab 栏上换分类。
 ///
-/// 打勾就在这儿做，不必先切到某个分类：沙漏视图是打开主线默认落地的那一屏，
-/// 也是最常问「今天要做什么」的地方 —— 那正是最常想打勾的地方。
+/// 这些本事三处的行都一样，不看它在哪一列，见 ADR-0003：沙漏视图是打开主线默认落地的那一屏，
+/// 也是最常盯着的一屏 —— 在这儿看见一句话写错了却得先切到某个分类去改，这一趟没有道理。
 /// 打完勾条目留在原处不动（它属于它的计划日，不是完成日），只是变淡、圈亮、旁边多一句完成于哪天。
-///
-/// 改写正文与移到分类仍旧只在分类视图里：那两件事要么把行挤变形，要么根本是横轴上的事。
 private struct TimelineRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
     let today: Date
     @State private var hovering = false
 
+    /// 正在就地改写这一行。改写时删除让开，其余各格原地不动。
+    @State private var editing = TodoEditing()
+
     /// 分类被删了就没有 tag 可画 —— 但那时它的待办也一并没了，实际见不到。
     private var category: Category? { store.category(todo.categoryID) }
 
-    /// 打勾之后圈填的颜色。取不着分类就退回整体主调，反正那时这行也见不到。
-    private var tint: Color { category?.color.tint ?? .teal }
+    /// 这一行上的彩色：打勾之后的圈，以及拖起来时手上跟着的那一小块。
+    ///
+    /// 轴上不用分类色，用整体主调的青色 —— 与 tab 栏上的沙漏、「今天」那一组同一个。
+    /// 理由与这儿的 tag 不着色是同一条：一屏几十行，每行一个彩色勾圈就成了噪点，
+    /// 而这一屏该抢眼的是「今天」。分类色留给未排期列的组头和分类视图，那两处颜色有出处。
+    private let tint: Color = .teal
 
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
             TodoToggle(done: todo.done, tint: tint) { store.toggleTodo(todo) }
 
-            Text(todo.text)
-                .multilineTextAlignment(.leading)
+            TodoText(todo: todo, editing: $editing)
                 .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
 
             Spacer(minLength: 8)
@@ -252,7 +266,8 @@ private struct TimelineRow: View {
 
             // 删除浮在 tag 左边，不追加在它右边：tag 于是永远钉在行尾，
             // 一排行的右边缘因此是齐的，悬停也不会让它跳位置。
-            if hovering {
+            // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
+            if hovering && !editing.active {
                 TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
             }
 
@@ -265,6 +280,7 @@ private struct TimelineRow: View {
         // 整行都拖得动，包括已完成的那些 —— 做完的事也照样可以改它排在哪天。
         // 内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         .contentShape(Rectangle())
+        .todoRowEditing(todo, editing: $editing)
         .draggable(DraggedTodo(id: todo.id)) {
             TodoDragPreview(text: todo.text, tint: tint)
         }

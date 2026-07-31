@@ -83,14 +83,19 @@ private struct UnscheduledCategoryGroup: View {
 /// 右列里的一行：打勾的圈、正文，悬停时右边浮出排期的入口和删除。
 /// 元素的顺序与另外两处的行一样，排期入口占的是分类视图里日期标签那一格。
 ///
-/// 改写正文与移到分类不在这儿 —— 那两件事仍旧只在分类视图里。
+/// 单击整行就地改写，右键还有「改写」与「移到分类」—— 三处的行本事一致，见 ADR-0003。
+/// 这一列只有 264pt 宽，改写时字挤了些，但「点一行就能改」不该因为它站在哪一列而失效。
 ///
-/// 整行可以拖到轴上某一天去排期，与轴上条目改期是同一个手势、同一套落点指示。
+/// 整行可以拖到轴上某一天去排期，也可以拖到 tab 栏上换分类，
+/// 与轴上条目那两个动作是同一个手势、同一套落点指示。
 private struct UnscheduledRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
     let tint: Color
     @State private var hovering = false
+
+    /// 正在就地改写这一行。改写时删除让开，排期入口留着。
+    @State private var editing = TodoEditing()
 
     /// 刚在这一行上打了勾，这条正在离开这一列。
     ///
@@ -103,15 +108,16 @@ private struct UnscheduledRow: View {
         HStack(spacing: TodoRowLayout.spacing) {
             TodoToggle(done: completing, tint: tint, toggle: complete)
 
-            Text(todo.text)
+            // 字号罩在外面而不是写在 `Text` 上：改写时那格换成输入框，两种模样的字因此一样大。
+            TodoText(todo: todo, editing: $editing)
                 .font(.callout)
-                .multilineTextAlignment(.leading)
 
             Spacer(minLength: 8)
 
             PlannedDayControl(todo: todo, rowHovering: hovering)
 
-            if hovering {
+            // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
+            if hovering && !editing.active {
                 TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
             }
         }
@@ -119,6 +125,7 @@ private struct UnscheduledRow: View {
         .onHover { hovering = $0 }
         // 内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         .contentShape(Rectangle())
+        .todoRowEditing(todo, editing: $editing)
         .draggable(DraggedTodo(id: todo.id)) {
             TodoDragPreview(text: todo.text, tint: tint)
         }
