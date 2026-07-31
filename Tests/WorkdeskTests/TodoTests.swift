@@ -69,6 +69,46 @@ struct TodoTests {
         }
     }
 
+    @Test("改写正文只动那一句，分类、三个日子与完成状态都不变")
+    func editingChangesOnlyTheText() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            let monday = try day(2026, 3, 2)
+            try schedule("写周报", in: work, on: monday, store)
+            store.toggleTodo(try #require(store.todos.first))
+            let before = try #require(store.todos.first)
+
+            store.editTodo(before, to: "  写月报  ")
+            let after = try #require(store.todos.first)
+            #expect(after.text == "写月报")
+            #expect(after.id == before.id)
+            #expect(after.categoryID == before.categoryID)
+            #expect(after.plannedOn == before.plannedOn)
+            #expect(after.createdAt == before.createdAt)
+            #expect(after.completedAt == before.completedAt)
+            #expect(after.done)
+
+            // 落盘了：改写不是只活在这一次运行里。
+            #expect(Store(directory: dir).todos.map(\.text) == ["写月报"])
+        }
+    }
+
+    @Test("改写成空白不改，原文留着 —— 删除是另一条路")
+    func blankTextLeavesTheTodoAlone() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            store.addTodo("写周报", in: work.id)
+            let todo = try #require(store.todos.first)
+
+            store.editTodo(todo, to: "")
+            store.editTodo(todo, to: "   \n ")
+
+            #expect(store.todos.map(\.text) == ["写周报"])
+        }
+    }
+
     @Test("重启后待办的归属、完成状态、创建日、完成日都还在")
     func todosSurviveARestart() throws {
         try withTemporaryDirectory { dir in

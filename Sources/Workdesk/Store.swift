@@ -30,6 +30,34 @@ final class Store {
         todos = load(Self.todosFile) ?? []
         favorites = load("favorites.json") ?? []
         chosenRecordingCategoryID = (load(Self.preferencesFile) as Preferences?)?.recordingCategoryID
+        seedOrders()
+    }
+
+    /// 给还没有位置的待办补上位置：按老规矩铺一遍 —— 已排期的在上，按计划日从早到晚；
+    /// 未排期的在下，按创建日从新到旧。升级上来的人第一眼看到的顺序因此和升级前一模一样，
+    /// 从那以后顺序就归自己拖了，见 ADR-0002。
+    ///
+    /// 已完成的也一并给上位置：它们此刻在右列，但取消打勾就回到左列，那时得有个落脚处。
+    /// 一条也不缺就什么都不做 —— 这是一次性的补写，不是每次启动都重排一遍。
+    private func seedOrders() {
+        guard todos.contains(where: { $0.order == nil }) else { return }
+        for categoryID in Set(todos.map(\.categoryID)) {
+            renumber(categoryID, as: Self.seededOrder(todos(in: categoryID)))
+        }
+        saveTodos()
+    }
+
+    /// 老规矩铺出来的顺序：已排期的在上，按计划日从早到晚（同一天按记下的先后）；
+    /// 未排期的在下，按创建日从新到旧 —— 最近才想到的事不沉到底部。
+    /// 只在补写位置时用得着；平时的顺序由使用者自己拖出来。
+    private static func seededOrder(_ todos: [TodoItem]) -> [TodoItem] {
+        // 排期与否在这儿一次分清：拆出计划日随着待办一起走，下面排序就不必再问它在不在。
+        let scheduled = todos.compactMap { todo in todo.plannedOn.map { (todo: todo, day: $0) } }
+            .sorted { ($0.day, $0.todo.createdAt) < ($1.day, $1.todo.createdAt) }
+            .map(\.todo)
+        let unscheduled = todos.filter { $0.plannedOn == nil }
+            .sorted { $0.createdAt > $1.createdAt }
+        return scheduled + unscheduled
     }
 
     // MARK: - Categories
@@ -167,33 +195,45 @@ final class Store {
             .map { TimelineDay(day: $0.key, todos: $0.value) }
     }
 
+    /// 沙漏视图右列要的分组：还没排期的未完成待办，按分类分开，分类的顺序就是 tab 栏上的顺序。
+    ///
+    /// 它们不在那条轴上（轴按计划日铺），却也不该因此看不见 —— 「总得做但不急」是个正常状态，
+    /// 不是缺失。已完成的不在这儿：这一列问的是「还有什么没安排」。
+    /// 一条也没有的分类不成组，右列因此是紧凑的。
+    /// 组内的先后与分类视图左列一致（使用者自己拖出来的那个），两处看到的顺序永远是同一个。
+    var unscheduled: [UnscheduledGroup] {
+        categories.compactMap { category in
+            let mine = Self.ordered(todos(in: category.id).filter { !$0.done && $0.plannedOn == nil })
+            return mine.isEmpty ? nil : UnscheduledGroup(category: category, todos: mine)
+        }
+    }
+
     /// 一个分类里的待办，按记下的先后排列。分类之间因此互不干扰。
     func todos(in categoryID: Category.ID) -> [TodoItem] {
         todos.filter { $0.categoryID == categoryID }
     }
 
-    /// 分类视图要的两列。三套排序规则都在这儿定死，视图层照着铺就是。
+    /// 分类视图要的两列。两套排序规则都在这儿定死，视图层照着铺就是。
     ///
-    /// 左列是两段直接拼起来的，不设分组标题：已排期的在上，按计划日从早到晚；
-    /// 未排期的在下，按创建日从新到旧 —— 最近才想到的事不该沉到底部。
-    /// 计划日只到天，同一天排了几条是常事，那时按记下的先后排 ——
-    /// 顺序写在比较里，不指望 `sorted` 碰巧稳定。
+    /// 左列按使用者自己拖出来的顺序，不按日期 —— 分类里关心的是「哪件先做」，
+    /// 「排在哪天」是沙漏视图的事，见 ADR-0002。已排期与未排期因此不再分成两段，
+    /// 混在一列里，靠行尾日期标签的有无自然区分。
     ///
-    /// 右列按完成日从新到旧，最近的成果在最上面。
+    /// 右列按完成日从新到旧，最近的成果在最上面 —— 那是一份记录，不由人排。
     func columns(in categoryID: Category.ID) -> CategoryColumns {
         let mine = todos(in: categoryID)
-        let unfinished = mine.filter { !$0.done }
-        // 排期与否在这儿一次分清：拆出计划日随着待办一起走，下面排序就不必再问它在不在。
-        let scheduled = unfinished.compactMap { todo in todo.plannedOn.map { (todo: todo, day: $0) } }
-            .sorted { ($0.day, $0.todo.createdAt) < ($1.day, $1.todo.createdAt) }
-            .map(\.todo)
-        let unscheduled = unfinished.filter { $0.plannedOn == nil }
-            .sorted { $0.createdAt > $1.createdAt }
+        let unfinished = Self.ordered(mine.filter { !$0.done })
         // 打了勾就必然有完成日；万一数据里缺了，退回创建日 ——
         // 宁可这一条排得不准，也不让它从两列里消失。
         let finished = mine.filter(\.done)
             .sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
-        return CategoryColumns(unfinished: scheduled + unscheduled, finished: finished)
+        return CategoryColumns(unfinished: unfinished, finished: finished)
+    }
+
+    /// 按位置从上到下排。载入时每条都补过位置，所以缺位置只可能是编码错误 ——
+    /// 真缺了就排到末尾，并按创建日兜底，宁可位置不准也不让它消失。
+    private static func ordered(_ todos: [TodoItem]) -> [TodoItem] {
+        todos.sorted { ($0.order ?? .max, $0.createdAt) < ($1.order ?? .max, $1.createdAt) }
     }
 
     /// 记一条待办。所属分类是必填的 —— 指向一个不存在的分类时什么也不发生，
@@ -204,8 +244,14 @@ final class Store {
     func addTodo(_ text: String, in categoryID: Category.ID, plannedOn day: Date? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, categories.contains(where: { $0.id == categoryID }) else { return }
-        todos.append(TodoItem(text: t, categoryID: categoryID, plannedOn: day))
+        todos.append(TodoItem(text: t, categoryID: categoryID, plannedOn: day, order: topOrder(in: categoryID)))
         saveTodos()
+    }
+
+    /// 落在这个分类最上面要多小的位置。刚记下的事就在眼前，不必先滚到底去找 ——
+    /// 不满意再拖走就是。
+    private func topOrder(in categoryID: Category.ID) -> Int {
+        (todos(in: categoryID).compactMap(\.order).min() ?? 0) - 1
     }
 
     /// 打勾/取消打勾。完成时刻原样落盘 —— 截到天是显示层的事，底下留着全时刻，
@@ -216,6 +262,18 @@ final class Store {
             $0.done.toggle()
             $0.completedAt = $0.done ? .now : nil
         }
+    }
+
+    /// 改写一条待办的正文。字打错了、事情说法变了，就地改这一句 ——
+    /// 不必删掉重记，那样会连计划日、创建日、完成日一起丢掉。
+    ///
+    /// 只动正文：归属分类、三个日子与完成状态都不变。
+    /// 空白正文不改，与 `addTodo`、`renameCategory` 同一副脾气 —— 待办总得有句话；
+    /// 删除是另一条路，不该由「把字删光」触发。
+    func editTodo(_ item: TodoItem, to text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        update(item.id) { $0.text = t }
     }
 
     /// 排上计划日，或改到另一天。只动计划日 —— 创建日与完成日各存各的，改期碰不到它们。
@@ -248,8 +306,57 @@ final class Store {
     /// 只改归属：计划日、创建日、完成日与完成状态都不因换分类而变 —— 横轴上的移动不碰纵轴。
     /// 目标分类不存在时什么也不发生，于是「每条待办都落在某个分类里」这条约束在这儿也守得住。
     func moveTodo(_ item: TodoItem, to categoryID: Category.ID) {
-        guard categories.contains(where: { $0.id == categoryID }) else { return }
-        update(item.id) { $0.categoryID = categoryID }
+        moveTodo(item.id, to: categoryID)
+    }
+
+    /// 同一件事，只是认 id 不认待办本身 —— 从分类视图把一行拖到 tab 栏另一个分类上时走这条路，
+    /// 拖着走的一路上只有一个身份。
+    ///
+    /// 落在新分类的最上面：这条待办在原来那个分类里的位置在新分类里没有意义，
+    /// 而「刚移过去的那条」该一眼看得见。
+    /// 目标就是它已经在的那个分类时什么也不发生 —— 那不是一次移动，位置也不该因此被动过。
+    /// - Returns: 这一移是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
+    @discardableResult
+    func moveTodo(_ id: TodoItem.ID, to categoryID: Category.ID) -> Bool {
+        guard categories.contains(where: { $0.id == categoryID }),
+              let item = todos.first(where: { $0.id == id }), item.categoryID != categoryID else { return false }
+        let top = topOrder(in: categoryID)
+        return update(id) {
+            $0.categoryID = categoryID
+            $0.order = top
+        }
+    }
+
+    /// 把一条待办放到另一条现在的位置上，其余的依次让开 —— 分类视图左列里拖着一行
+    /// 放到另一行上时走这条路，说的是「放到谁身上」而不是第几位，与 `moveCategory(_:onto:)` 同一副脾气。
+    ///
+    /// 只动这一列的顺序：归属分类、三个日子与完成状态都不因这一拖而变。
+    /// 两条不在同一个分类、是同一条、或哪一条已经不在了，都什么也不发生 ——
+    /// 跨分类的拖拽不存在，改归属是把它拖到 tab 上的事。
+    /// - Returns: 这一放是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
+    @discardableResult
+    func reorderTodo(_ id: TodoItem.ID, onto targetID: TodoItem.ID) -> Bool {
+        guard id != targetID,
+              let moved = todos.first(where: { $0.id == id }),
+              let target = todos.first(where: { $0.id == targetID }),
+              moved.categoryID == target.categoryID else { return false }
+        // 整个分类一起排 —— 已完成的也在这条队伍里，它们此刻在右列，但取消打勾就回到左列。
+        var queue = Self.ordered(todos(in: moved.categoryID))
+        guard let from = queue.firstIndex(where: { $0.id == id }),
+              let to = queue.firstIndex(where: { $0.id == targetID }) else { return false }
+        queue.insert(queue.remove(at: from), at: to)
+        renumber(moved.categoryID, as: queue)
+        saveTodos()
+        return true
+    }
+
+    /// 把一个分类的位置从头编一遍：交进来的顺序就是从上到下的顺序。
+    /// 每次都全编而不是插空，于是位置永远是紧挨着的一串小整数，不会越拖越挤。
+    private func renumber(_ categoryID: Category.ID, as order: [TodoItem]) {
+        let positions = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($0.element.id, $0.offset) })
+        for i in todos.indices where todos[i].categoryID == categoryID {
+            todos[i].order = positions[todos[i].id]
+        }
     }
 
     func deleteTodo(_ item: TodoItem) {

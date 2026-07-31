@@ -157,13 +157,15 @@ private struct HourglassTab: View {
 
 /// 分类 tab。点它切过去，右键是这个分类的全部管理动作：改名、换色、删除。
 /// 拖着它放到另一个 tab 上就换了顺序 —— 最常用的分类因此可以排到靠前的位置。
+/// 它同时接得住从分类视图里拖上来的待办：松手那条待办就归到这个分类。
 private struct CategoryTab: View {
     @Environment(Store.self) private var store
     let category: Category
     let isSelected: Bool
     let select: () -> Void
     @State private var hovering = false
-    @State private var renaming = false
+    /// 右键菜单点开的那个小面板 —— 改名和选色是同一个位置上的两件事，一次只开一个。
+    @State private var panel: CategoryPanel?
     /// 刚刚有一次删除被拦下时，里头还剩多少条待办。非空分类删不掉这件事由 `Store` 判，
     /// 连同这个数字一起交回来，这儿只负责把话说清楚。
     @State private var refusedTodoCount = 0
@@ -185,11 +187,20 @@ private struct CategoryTab: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .contextMenu { menu }
-        .popover(isPresented: $renaming, arrowEdge: .bottom) {
-            // 起名和改名是同一件事，所以是同一个面板，只是这次先装着原来的名字。
-            CategoryNamePanel(title: "重命名分类", confirm: "改名", initial: category.name) { name in
-                store.renameCategory(category.id, to: name)
-                renaming = false
+        .popover(item: $panel, arrowEdge: .bottom) { which in
+            switch which {
+            case .renaming:
+                // 起名和改名是同一件事，所以是同一个面板，只是这次先装着原来的名字。
+                CategoryNamePanel(title: "重命名分类", confirm: "改名", initial: category.name) { name in
+                    store.renameCategory(category.id, to: name)
+                    panel = nil
+                }
+            case .recoloring:
+                // 选完就收 —— 换色是一下的事，不必再点一次「好」。
+                ColorPalettePanel(selected: category.color) { color in
+                    store.recolorCategory(category.id, to: color)
+                    panel = nil
+                }
             }
         }
         // 拦下来之后只说明为什么，不在这儿给「连同待办一起删」的入口 ——
@@ -200,32 +211,30 @@ private struct CategoryTab: View {
             Text("先把这 \(refusedTodoCount) 条待办移到别的分类，或者删掉，再来删这个分类。")
         }
         .draggable(DraggedCategory(id: category.id))
-        .dropDestination(for: DraggedCategory.self) { dropped, _ in
-            // 一次拖一个 —— tab 栏上没有多选。落到这个 tab 的位置上，其余的依次让开。
+        // 一个 tab 上只挂一个落点，两种载荷都由它接 —— 挂两个的话上面那个会把下面那个整个挡住，
+        // 见 `DraggedOntoTab`。
+        .dropDestination(for: DraggedOntoTab.self) { dropped, _ in
+            // 一次拖一个 —— tab 栏上没有多选，落下的就只会是刚才抓起的那一个。
             guard let dropped = dropped.first else { return false }
-            store.moveCategory(dropped.id, onto: category.id)
-            return true
+            switch dropped {
+            case .category(let id):
+                // 落到这个 tab 的位置上，其余的依次让开。
+                store.moveCategory(id, onto: category.id)
+                return true
+            case .todo(let id):
+                // 手势版的「移到分类」。只改归属：三个日子与完成状态都不变，
+                // 与待办行右键菜单里那条路是同一件事。
+                return store.moveTodo(id, to: category.id)
+            }
         } isTargeted: { targeted = $0 }
         .animation(.easeOut(duration: 0.12), value: targeted)
     }
 
     @ViewBuilder
     private var menu: some View {
-        Button("重命名…") { renaming = true }
-        Menu("换颜色") {
-            ForEach(CategoryColor.palette, id: \.self) { color in
-                Button {
-                    store.recolorCategory(category.id, to: color)
-                } label: {
-                    // 当前那个前面带勾。撞色是允许的，所以这儿不灰掉任何一个。
-                    if color == category.color {
-                        Label(color.label, systemImage: "checkmark")
-                    } else {
-                        Text(color.label)
-                    }
-                }
-            }
-        }
+        Button("重命名…") { panel = .renaming }
+        // 一整盘颜色摊开来看比一串色名的菜单好挑，所以换色也走面板，不做二级菜单。
+        Button("换颜色…") { panel = .recoloring }
         Divider()
         Button("删除分类", role: .destructive) { delete() }
     }
@@ -243,6 +252,53 @@ private struct CategoryTab: View {
     }
 }
 
+/// tab 右键点开的小面板是哪一个。两个面板从同一个位置弹出来，所以是一个状态而不是两个 ——
+/// 「一次只开一个」这件事就不必靠视图自己守着了。
+private enum CategoryPanel: String, Identifiable {
+    case renaming, recoloring
+
+    var id: String { rawValue }
+}
+
+/// 摊开的一盘颜色。整块色板一次全在眼前，点哪个就是哪个 ——
+/// 色块本身就是它要说的话，所以不写色名，名字只留给悬停提示和读屏。
+private struct ColorPalettePanel: View {
+    /// 这个分类现在是什么颜色。带一圈环的那个。
+    let selected: CategoryColor
+    let pick: (CategoryColor) -> Void
+
+    /// 一行几个。14 种颜色排成整齐的两行。
+    private let columns = Array(repeating: GridItem(.fixed(26), spacing: 8), count: 7)
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            // 这儿按色相环的顺序铺（也就是 `allCases`），不按 `palette` 那个跳着走的取色顺序 ——
+            // 挑颜色的人要的是一条顺下来的光谱，好找。
+            ForEach(CategoryColor.allCases, id: \.self) { color in
+                swatch(color)
+            }
+        }
+        .padding(14)
+    }
+
+    private func swatch(_ color: CategoryColor) -> some View {
+        Button { pick(color) } label: {
+            Circle()
+                .fill(color.tint)
+                .frame(width: 20, height: 20)
+                // 选中的那个外面套一圈同色的细环。撞色是允许的，所以别的一个都不灰掉。
+                .padding(3)
+                .overlay(
+                    Circle().strokeBorder(color == selected ? color.tint : .clear, lineWidth: 1.5)
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(color.label)
+        .accessibilityLabel(color.label)
+    }
+}
+
 /// 拖拽时在两个 tab 之间递过去的东西：一个分类的身份，仅此而已。
 /// 与沙漏视图里的 `DraggedTodo` 是同一套路数：只带 id，落下时现找现挪。
 /// 类型是自家的，于是外来的文字、链接接不住，从 tab 栏拖出去别的应用也接不住。
@@ -251,6 +307,25 @@ private struct DraggedCategory: Codable, Transferable {
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .workdeskCategory)
+    }
+}
+
+/// 落到一个 tab 上的东西。两种载荷，落下时做的是两件事：一个分类落在另一个 tab 上是换顺序，
+/// 一条待办落在 tab 上是改归属。
+///
+/// 合成这一个类型，是因为**一个视图上只能挂一个 `dropDestination`**。挂两个的话，上面那个会把
+/// 下面那个整个挡住：`dropDestination` 在 AppKit 那层注册的是 `public.data` 这样的通用类型，
+/// 两个落点长得一模一样，拖拽进来只命中最上面那个；它一看载荷不是自己要的就拒收，
+/// 而 AppKit 不会再往下传 —— 于是下面那个永远等不到。
+///
+/// 只导入不导出：tab 从来不用这个类型往外拖，往外拖的是 `DraggedCategory` 本身。
+enum DraggedOntoTab: Transferable {
+    case category(Category.ID)
+    case todo(TodoItem.ID)
+
+    static var transferRepresentation: some TransferRepresentation {
+        ProxyRepresentation { (dragged: DraggedCategory) in DraggedOntoTab.category(dragged.id) }
+        ProxyRepresentation { (dragged: DraggedTodo) in DraggedOntoTab.todo(dragged.id) }
     }
 }
 
@@ -348,30 +423,64 @@ struct NewCategoryButton<Label: View>: View {
 
 extension CategoryColor {
     /// 色名到色值。落盘的只有色名，于是这套配色可以随时整体调整。
+    /// 每种颜色两副色值：浅色外观下用深的那副，深色外观下用浅的那副 ——
+    /// tab 上的字是这个颜色本身，两种外观下都得压得住背景读得清。
     var tint: Color {
+        let (light, dark) = values
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            NSColor(rgb: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light)
+        })
+    }
+
+    /// (浅色外观, 深色外观)。同一档明度上绕色相环取的一圈，于是整块色板浓淡一致。
+    private var values: (light: UInt32, dark: UInt32) {
         switch self {
-        case .teal: .teal
-        case .mint: .mint
-        case .cyan: .cyan
-        case .blue: .blue
-        case .indigo: .indigo
-        case .purple: .purple
-        case .pink: .pink
-        case .orange: .orange
+        case .red: (0xDC2626, 0xF87171)
+        case .orange: (0xEA580C, 0xFB923C)
+        case .amber: (0xD97706, 0xFBBF24)
+        case .lime: (0x65A30D, 0xA3E635)
+        case .green: (0x16A34A, 0x4ADE80)
+        case .mint: (0x059669, 0x34D399)
+        case .teal: (0x0E96A8, 0x3FCEDC)
+        case .cyan: (0x0284C7, 0x38BDF8)
+        case .blue: (0x2563EB, 0x60A5FA)
+        case .indigo: (0x4F46E5, 0x818CF8)
+        case .purple: (0x9333EA, 0xC084FC)
+        case .fuchsia: (0xC026D3, 0xE879F9)
+        case .pink: (0xDB2777, 0xF472B6)
+        case .slate: (0x52525B, 0xA1A1AA)
         }
     }
 
-    /// 换颜色的菜单里这个颜色叫什么。只在那一处用得着 —— 别处的颜色都是看见的，不用叫名字。
+    /// 这个颜色叫什么。选色盘上的色块看得见颜色，不写字 —— 名字是给悬停提示和读屏用的。
     var label: String {
         switch self {
-        case .teal: "青"
+        case .red: "红"
+        case .orange: "橙"
+        case .amber: "琥珀"
+        case .lime: "黄绿"
+        case .green: "绿"
         case .mint: "薄荷"
+        case .teal: "青"
         case .cyan: "天蓝"
         case .blue: "蓝"
         case .indigo: "靛蓝"
         case .purple: "紫"
+        case .fuchsia: "品红"
         case .pink: "粉"
-        case .orange: "橙"
+        case .slate: "石墨"
         }
+    }
+}
+
+extension NSColor {
+    /// 0xRRGGBB。色板里的色值就是照着这个写的 —— 十六进制读起来比三个小数直观。
+    fileprivate convenience init(rgb: UInt32) {
+        self.init(
+            srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255,
+            blue: CGFloat(rgb & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }

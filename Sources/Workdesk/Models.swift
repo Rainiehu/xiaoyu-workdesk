@@ -9,11 +9,21 @@ struct Category: Identifiable, Codable, Equatable {
 
 /// 分类可用的颜色。只存色名不存色值 —— 具体色值由视图层决定，
 /// 于是配色可以整体调整而不动已经落盘的数据。
+///
+/// 这些色名绕色相环走一圈，任意两个都看得出差别 —— tab 栏上一排彩色的字，
+/// 「像是同一个颜色」和「就是同一个颜色」一样让人认错分类。末尾的 `slate` 是唯一的中性色。
 enum CategoryColor: String, Codable, CaseIterable, Hashable {
-    case teal, mint, cyan, blue, indigo, purple, pink, orange
+    case red, orange, amber, lime, green, mint, teal, cyan, blue, indigo, purple, fuchsia, pink, slate
 
-    /// 与整体青色主调协调的预设色板，新建分类按这个顺序取色。
-    static let palette = allCases
+    /// 新建分类按这个顺序取色。它不是色相环的顺序，是跳着走的 ——
+    /// 连着建的几个分类因此拿到的是隔得最远的几种颜色，而不是相邻的几档绿。
+    /// 首位仍是青色：一个分类的人，看到的是整体主调。
+    ///
+    /// 这份名单是手写的，每一种颜色都要在里头出现一次 —— 加了新色名记得也加到这儿来。
+    static let palette: [CategoryColor] = [
+        .teal, .orange, .indigo, .pink, .green, .amber, .cyan, .purple,
+        .lime, .blue, .red, .mint, .fuchsia, .slate,
+    ]
 }
 
 struct TodoItem: Identifiable, Codable, Equatable {
@@ -29,6 +39,12 @@ struct TodoItem: Identifiable, Codable, Equatable {
     /// 安排去做的那一天。可空 —— 「总得做但不急」的事可以永远不排期。
     /// 与创建日、完成日各自独立存储，谁都不会覆盖谁。
     var plannedOn: Date?
+    /// 在所属分类里的位置，数越小越靠上 —— 分类视图左列照着它铺，见 ADR-0002。
+    /// 只在同一个分类里可比，跨分类比大小没有意义。
+    ///
+    /// 可空只是为了读得进还没有这个字段的旧数据：`Store` 载入时会照老规矩给缺的补上，
+    /// 补完之后每条都有。别把「没有位置」当成一种状态来用。
+    var order: Int?
 }
 
 /// 一次删除分类请求的下场。删不掉有两种，说清楚是哪一种 ——
@@ -52,6 +68,15 @@ struct CategoryColumns: Equatable {
     /// 这个分类一件事都没有。视图层照着它决定不分列 —— 判断放在这儿，
     /// 免得视图自己去聚合两个数组。
     var isEmpty: Bool { unfinished.isEmpty && finished.isEmpty }
+}
+
+/// 沙漏视图右列里的一组：一个分类，和它名下还没排期的未完成待办。
+/// 只是 `Store` 分好的一份结果，不带任何行为 —— 聚合在 `Store` 里做，视图层照着铺就是。
+struct UnscheduledGroup: Identifiable, Equatable {
+    var category: Category
+    var todos: [TodoItem]
+
+    var id: Category.ID { category.id }
 }
 
 /// 沙漏视图里的一天：一个计划日，和被安排在这天的待办。

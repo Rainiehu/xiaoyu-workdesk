@@ -1,14 +1,18 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 沙漏视图：横跨所有分类的一条连续时间轴。排了计划日的待办按计划日铺成这条轴，
 /// 今天锚在中间、上方是过去、下方是未来，打开时就滚到今天。
 ///
 /// 分组由 `Store.timeline(today:)` 给出，这里不自己聚合。
 ///
+/// 右边另有一列未排期的事（`UnscheduledColumn`），与轴分开滚 —— 轴回答「排在哪天」，
+/// 那一列回答「还有什么没安排」，从那儿拖一条到轴上某一天就排上了。
+///
 /// 顶上是记事输入区：这里是打开主线默认落地的地方，也是最常问「接下来要做什么」的地方，
 /// 所以它必须能直接记录，不该逼使用者先切到某个分类。在这儿记下的待办自动排在今天，
 /// 于是它立刻出现在眼前这条轴上，而不是凭空消失到某个分类里去。
+/// 两边的行都能就地打勾、就地删除 —— 这是最常问「今天要做什么」的一屏，不该为了打个勾先切到某个分类去。
+/// 改写正文与移到分类不在这儿，那两件事仍旧只在分类视图里。
 /// 轴上的条目可以直接拖到别的日期分组里去改期：调整安排是一个手势，不必点开日期面板。
 /// 拖拽只发生在这条轴的日期分组之间，也只改计划日 —— 归属哪个分类是横轴上的事，不因这一拖而变。
 ///
@@ -30,16 +34,23 @@ struct HourglassView: View {
         // 而跨过零点之后的下一次渲染会自己跟上，不像存进 @State 那样一直停在昨天。
         let today = Date.now
 
-        return VStack(spacing: 0) {
-            // 输入区在 ScrollView 外面：轴滚到哪儿它都在顶上，记事随时都在手边。
-            if let category = store.recordingCategory {
-                input(category: category, today: today)
-                    .padding(.horizontal, contentInset)
-                    .padding(.top, contentInset)
-                    .frame(maxWidth: contentWidth)
-                    .frame(maxWidth: .infinity)
+        return HStack(alignment: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                // 输入区在 ScrollView 外面：轴滚到哪儿它都在顶上，记事随时都在手边。
+                if let category = store.recordingCategory {
+                    input(category: category, today: today)
+                        .padding(.horizontal, contentInset)
+                        .padding(.top, contentInset)
+                        .frame(maxWidth: contentWidth)
+                        .frame(maxWidth: .infinity)
+                }
+                timeline(today: today)
             }
-            timeline(today: today)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 未排期的事单开一列，与轴分开滚：一边是「排在哪天」，一边是「还没安排」。
+            Divider()
+            UnscheduledColumn()
+                .frame(maxHeight: .infinity)
         }
     }
 
@@ -67,9 +78,13 @@ struct HourglassView: View {
     }
 
     /// 记事的那一条：输入框，旁边是记到哪个分类。
+    ///
+    /// 加号取整体主调的青色，与 tab 栏上那个沙漏一致 —— 它属于这一屏，不属于某个分类。
+    /// 「这条会记到哪儿」由右边那个分类选择器说，它才是跟着分类换颜色的那个；
+    /// 加号也跟着换的话，两处说同一件事，颜色反倒没了着落。
     private func input(category: Category, today: Date) -> some View {
         TodoInputField(
-            tint: category.color.tint,
+            tint: .teal,
             prompt: "记一件事，回车记在今天…",
             text: $draft,
             focused: $inputFocused,
@@ -89,8 +104,10 @@ struct HourglassView: View {
 }
 
 /// 记到哪个分类。列出全部分类，选中的那个由 `Store` 记着 —— 它跨重启保留，
-/// 于是连续记同一类事情不用反复选。样子取自沙漏视图里的分类 tag，
-/// 「这条会记成什么颜色」因此一眼就对得上。
+/// 于是连续记同一类事情不用反复选。
+///
+/// 与轴上每行的 tag 一样是光板的：只有名字和一个小箭头，没有胶囊也不着色 ——
+/// 这一条本就是记事栏里最不该抢眼的一格，箭头说明它点得开，够了。
 private struct RecordingCategoryPicker: View {
     @Environment(Store.self) private var store
     let current: Category
@@ -116,10 +133,14 @@ private struct RecordingCategoryPicker: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
             }
-            .categoryChip(current.color.tint)
+            .foregroundStyle(.secondary)
+            // 没有底色也得有块点得着的地方：这点内缩就是它的按钮范围。
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
         }
-        // 按钮式菜单加无样式按钮：自定义的那身胶囊才画得出来 ——
-        // 无边框菜单会把 label 压成一行纯文字，颜色和底色都留不住。
+        // 按钮式菜单加无样式按钮：自己排的那副 label 才留得住 ——
+        // 无边框菜单会把它压成一行纯文字，字号、间距都留不住。
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
@@ -180,58 +201,40 @@ private struct DayGroup: View {
         .animation(.easeOut(duration: 0.12), value: targeted)
     }
 
+    /// 日期头。今天的写得大些、重些、是青的 —— 强调它靠字本身，不再拉一道横线：
+    /// 那一组已经有整块底色框着了，横线是同一句话说第三遍。
     private var header: some View {
-        HStack(spacing: 8) {
-            Text(day.day.dayLabel(relativeTo: today))
-                .font(.system(size: isToday ? 15 : 13, weight: isToday ? .semibold : .medium, design: .rounded))
-                .foregroundStyle(isToday ? AnyShapeStyle(.teal) : AnyShapeStyle(.secondary))
-            if isToday {
-                Rectangle()
-                    .fill(.teal.opacity(0.35))
-                    .frame(height: 1)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 2)
+        Text(day.day.dayLabel(relativeTo: today))
+            .font(.system(size: isToday ? 15 : 13, weight: isToday ? .semibold : .medium, design: .rounded))
+            .foregroundStyle(isToday ? AnyShapeStyle(.teal) : AnyShapeStyle(.secondary))
+            .padding(.horizontal, 10)
+            .padding(.bottom, 2)
     }
 }
 
-/// 拖拽时在两个日期分组之间递过去的东西：一条待办的身份，仅此而已。
-/// 只带 id 不带整条待办 —— 落下时按 id 现找现改，途中它被打了勾或被删了，也不会有旧副本被写回去。
+/// 轴上的一行待办：打勾的圈、正文、所属分类的 tag（这儿是光板的：没有胶囊、不着色），已完成的再附一句实际完成日。
+/// 圈点得动、悬停时右边浮出删除，整行还可以拖到别的日期分组里去改期。
 ///
-/// 类型是自家的，于是从别处拖来的文字、链接一律不被当成改期；反过来，
-/// 从轴上拖出去的东西别的应用也接不住 —— 这个手势只在这条轴里成立。
-private struct DraggedTodo: Codable, Transferable {
-    var id: TodoItem.ID
-
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .workdeskTodo)
-    }
-}
-
-extension UTType {
-    /// 只有沙漏视图自己拖出来的条目认得这个类型。与 `build.sh` 里 Info.plist 的
-    /// `UTExportedTypeDeclarations` 是同一个标识符，两边要一起改。
-    fileprivate static let workdeskTodo = UTType(exportedAs: "cc.huxiaoyu.workdesk.todo")
-}
-
-/// 轴上的一行待办：正文、所属分类的彩色 tag，已完成的再画个勾并附一句实际完成日。
-/// 整行可以拖到别的日期分组里去改期。
+/// 打勾就在这儿做，不必先切到某个分类：沙漏视图是打开主线默认落地的那一屏，
+/// 也是最常问「今天要做什么」的地方 —— 那正是最常想打勾的地方。
+/// 打完勾条目留在原处不动（它属于它的计划日，不是完成日），只是变淡、圈亮、旁边多一句完成于哪天。
+///
+/// 改写正文与移到分类仍旧只在分类视图里：那两件事要么把行挤变形，要么根本是横轴上的事。
 private struct TimelineRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
     let today: Date
+    @State private var hovering = false
+
+    /// 分类被删了就没有 tag 可画 —— 但那时它的待办也一并没了，实际见不到。
+    private var category: Category? { store.category(todo.categoryID) }
+
+    /// 打勾之后圈填的颜色。取不着分类就退回整体主调，反正那时这行也见不到。
+    private var tint: Color { category?.color.tint ?? .teal }
 
     var body: some View {
-        HStack(spacing: 10) {
-            // 只给已完成的画勾，未完成的这里留空 —— 一个空心圆圈看着就像能点，
-            // 而打勾和改期都在分类视图里做，轴上只看得见事情排在哪天。
-            // 位置留着，好让各行的正文对齐。
-            Image(systemName: "checkmark")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .opacity(todo.done ? 1 : 0)
-                .frame(width: 14)
+        HStack(spacing: TodoRowLayout.spacing) {
+            TodoToggle(done: todo.done, tint: tint) { store.toggleTodo(todo) }
 
             Text(todo.text)
                 .multilineTextAlignment(.leading)
@@ -241,39 +244,59 @@ private struct TimelineRow: View {
 
             if let completedAt = todo.completedAt {
                 // 条目留在计划日那一组，实际完成日只在旁边附注一句：可查，但不喧宾夺主。
+                // 比分类视图里那个日期更淡：轴上这一行本就没什么该抢眼的，颜色留给「今天」那一组。
                 Text("完成于 \(completedAt.dayLabel(relativeTo: today))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
 
-            // 分类被删了就没有 tag 可画 —— 但那时它的待办也一并没了，实际见不到。
-            if let category = store.category(todo.categoryID) {
-                CategoryTag(category: category)
+            // 删除浮在 tag 左边，不追加在它右边：tag 于是永远钉在行尾，
+            // 一排行的右边缘因此是齐的，悬停也不会让它跳位置。
+            if hovering {
+                TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
+            }
+
+            if let category {
+                CategoryTag(category: category, chip: false)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .todoRowChrome(hovering: hovering)
+        .onHover { hovering = $0 }
         // 整行都拖得动，包括已完成的那些 —— 做完的事也照样可以改它排在哪天。
         // 内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         .contentShape(Rectangle())
-        .draggable(DraggedTodo(id: todo.id))
+        .draggable(DraggedTodo(id: todo.id)) {
+            TodoDragPreview(text: todo.text, tint: tint)
+        }
     }
 }
 
-/// 待办所属分类的彩色 tag。着色取自分类 tab 选中态的那一套，两处因此永远是同一个颜色。
+/// 待办所属分类的 tag。两副样子：
+///
+/// - 带胶囊的（`chip` 为真）用在未排期列的组头上 —— 那儿它是一整组的标题，一屏只有几个，
+///   着色取自分类 tab 选中态的那一套，两处因此永远是同一个颜色。
+/// - 光板的用在轴上每一行：只有名字，没有底、没有边、也不着色。轴上一屏几十行，
+///   每行挂一个彩色胶囊就成了噪点，而那儿该抢眼的是「今天」那一组，不是每行属于谁。
 struct CategoryTag: View {
     let category: Category
+    var chip: Bool = true
 
     var body: some View {
-        Text(category.name)
-            .font(.caption)
-            .categoryChip(category.color.tint)
+        if chip {
+            Text(category.name)
+                .font(.caption)
+                .categoryChip(category.color.tint)
+        } else {
+            Text(category.name)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
 extension View {
-    /// 分类的彩色胶囊。轴上每条待办旁的 tag 与记事的分类选择器共用这一副样子 ——
-    /// 「这条会记成什么颜色」于是与轴上已有的 tag 一眼对得上，不会各自漂移。
+    /// 分类的彩色胶囊。眼下只有未排期列的组头用它 —— 那儿的颜色是一整组的标题。
+    /// 着色取自分类 tab 选中态的那一套（`chipFill` / `chipStroke`），两处因此永远是同一个颜色。
     fileprivate func categoryChip(_ tint: Color) -> some View {
         foregroundStyle(tint)
             .padding(.horizontal, 8)

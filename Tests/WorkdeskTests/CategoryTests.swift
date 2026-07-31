@@ -30,6 +30,13 @@ struct CategoryTests {
         }
     }
 
+    @Test("色板把每一种颜色都列了一次，一种不多一种不少")
+    func paletteCoversEveryColor() {
+        // 取色顺序是手写的名单，加了新色名却忘了加进去，那种颜色就永远轮不到。
+        #expect(Set(CategoryColor.palette) == Set(CategoryColor.allCases))
+        #expect(CategoryColor.palette.count == CategoryColor.allCases.count)
+    }
+
     @Test("连续新建的分类获得色板中互不相同的颜色")
     func colorsAreDistinct() throws {
         try withTemporaryDirectory { dir in

@@ -6,35 +6,36 @@ import Testing
 @MainActor
 @Suite("分类视图的两列")
 struct CategoryColumnsTests {
-    @Test("左列里已排期的待办按计划日从早到晚")
-    func scheduledTodosGoEarliestFirst() throws {
-        try withTemporaryDirectory { dir in
-            let store = Store(directory: dir)
-            let work = try #require(store.addCategory("工作"))
-            // 刻意乱序排期，好让升序不是「碰巧按记下的先后」蒙对的。
-            try schedule("交周报", in: work, on: day(2026, 3, 9), store)
-            try schedule("写周报", in: work, on: day(2026, 3, 5), store)
-            try schedule("开会", in: work, on: day(2026, 3, 7), store)
-
-            let columns = store.columns(in: work.id)
-
-            #expect(columns.unfinished.map(\.text) == ["写周报", "开会", "交周报"])
-        }
-    }
-
-    @Test("左列里未排期的待办接在已排期的后面，按创建日从新到旧")
-    func unscheduledTodosFollowNewestFirst() throws {
+    @Test("新记下的待办落在左列最上面")
+    func newTodosLandOnTop() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let work = try #require(store.addCategory("工作"))
             store.addTodo("先想到的", in: work.id)
-            try schedule("交周报", in: work, on: day(2026, 3, 9), store)
             store.addTodo("后想到的", in: work.id)
-            try schedule("写周报", in: work, on: day(2026, 3, 5), store)
+            store.addTodo("刚想到的", in: work.id)
 
             let columns = store.columns(in: work.id)
 
-            #expect(columns.unfinished.map(\.text) == ["写周报", "交周报", "后想到的", "先想到的"])
+            #expect(columns.unfinished.map(\.text) == ["刚想到的", "后想到的", "先想到的"])
+        }
+    }
+
+    /// 左列的顺序归使用者自己拖，日期在这一列里不组织任何东西，见 ADR-0002。
+    @Test("排期与改期都不动左列的顺序")
+    func schedulingLeavesTheOrderAlone() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            store.addTodo("先想到的", in: work.id)
+            store.addTodo("后想到的", in: work.id)
+            let before = store.columns(in: work.id).unfinished.map(\.text)
+
+            // 给排在底下的那条排一个最早的日子：换了老规矩它会窜到最上面去。
+            store.setPlannedDay(try day(2026, 3, 2), for: try todo("先想到的", store))
+            store.setPlannedDay(try day(2026, 3, 9), for: try todo("后想到的", store))
+
+            #expect(store.columns(in: work.id).unfinished.map(\.text) == before)
         }
     }
 
@@ -71,8 +72,8 @@ struct CategoryColumnsTests {
         }
     }
 
-    @Test("取消打勾后待办回到左列，未排期的按创建日落回原位")
-    func untickingPutsAnUnscheduledTodoBackInPlace() throws {
+    @Test("取消打勾后待办回到左列原来的位置")
+    func untickingPutsATodoBackInPlace() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let work = try #require(store.addCategory("工作"))
@@ -84,46 +85,30 @@ struct CategoryColumnsTests {
             store.toggleTodo(try todo("中间想到的", store))
 
             let columns = store.columns(in: work.id)
-            // 回到左列时按创建日落回中间，不因为打过勾就跑到一头去。
+            // 落回原来那个位置，不因为打过勾就跑到一头去。
             #expect(columns.unfinished.map(\.text) == ["最晚想到的", "中间想到的", "最早想到的"])
             #expect(columns.finished.isEmpty)
         }
     }
 
-    @Test("取消打勾后已排期的待办回到左列上半段，按计划日落回原位")
-    func untickingPutsAScheduledTodoBackInPlace() throws {
+    /// 打勾的那条离开左列时不重排，回来时也就回得到原处 —— 中间那条被抽走又插回来，
+    /// 它两边的先后一次都没变过。
+    @Test("拖过序的一列里，打勾再取消也回得到原处")
+    func untickingRespectsAHandMadeOrder() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let work = try #require(store.addCategory("工作"))
-            try schedule("周一的事", in: work, on: day(2026, 3, 2), store)
-            try schedule("周三的事", in: work, on: day(2026, 3, 4), store)
-            try schedule("周五的事", in: work, on: day(2026, 3, 6), store)
-            store.addTodo("总得做但不急", in: work.id)
-
-            store.toggleTodo(try todo("周三的事", store))
-            store.toggleTodo(try todo("周三的事", store))
-
-            let columns = store.columns(in: work.id)
-            #expect(columns.unfinished.map(\.text) == ["周一的事", "周三的事", "周五的事", "总得做但不急"])
-            #expect(columns.finished.isEmpty)
-        }
-    }
-
-    /// 计划日只到天，同一天排了几条是常事 —— 这时候按记下的先后排，
-    /// 顺序因此是定死的，不指望 `sorted` 碰巧稳定。
-    @Test("同一个计划日里的几条按记下的先后排")
-    func todosOnTheSameDayKeepTheOrderTheyWereWrittenIn() throws {
-        try withTemporaryDirectory { dir in
-            let store = Store(directory: dir)
-            let work = try #require(store.addCategory("工作"))
-            let monday = try day(2026, 3, 2)
-            for text in ["第一件", "第二件", "第三件", "第四件", "第五件"] {
-                try schedule(text, in: work, on: monday, store)
+            for text in ["第一件", "第二件", "第三件"] {
+                store.addTodo(text, in: work.id)
             }
+            // 拖成自己排的样子：把最早那条提到最上面。
+            store.reorderTodo(try todo("第一件", store).id, onto: try todo("第三件", store).id)
+            let arranged = store.columns(in: work.id).unfinished.map(\.text)
 
-            let columns = store.columns(in: work.id)
+            store.toggleTodo(try todo("第二件", store))
+            store.toggleTodo(try todo("第二件", store))
 
-            #expect(columns.unfinished.map(\.text) == ["第一件", "第二件", "第三件", "第四件", "第五件"])
+            #expect(store.columns(in: work.id).unfinished.map(\.text) == arranged)
         }
     }
 

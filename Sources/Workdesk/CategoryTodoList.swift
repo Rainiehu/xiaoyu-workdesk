@@ -3,8 +3,8 @@ import SwiftUI
 /// 一个分类里的待办，左右分列：左边待完成，右边已完成，同屏可见、互不干扰。
 /// 左列突出、右列整体淡化 —— 注意力自然落在还没做的事情上，做完的事退成可查的背景。
 ///
-/// 两列的顺序都由 `Store.columns(in:)` 定，这里一行排序也不做。左列的两段（已排期、未排期）
-/// 直接拼在一起，不设分组标题 —— 靠日期标签的有无自然区分。
+/// 两列的顺序都由 `Store.columns(in:)` 定，这里一行排序也不做。左列的顺序是使用者自己拖出来的
+/// （拖一行放到另一行上），已排期与未排期混在一列里，靠日期标签的有无自然区分，见 ADR-0002。
 ///
 /// 时间在这个视图里刻意弱化：日期只是行尾一个低对比度的次要标签，不构成组织结构 ——
 /// 在分类里关心的是「有哪些事」，不是「排在哪天」。
@@ -130,31 +130,35 @@ struct CategoryTodoList: View {
     }
 }
 
-/// 一行待办：左边的圆圈打勾/取消，悬停时右边浮出删除，右键可以把它移到别的分类。
-/// 已完成的不带删除线 —— 完成的事情读起来该仍然清晰体面。淡化交给所在那一列，行本身不管。
+/// 一行待办：左边的圆圈打勾/取消，悬停时右边浮出删除，双击正文就地改写，
+/// 右键是同样这两件事的菜单入口。已完成的不带删除线 —— 完成的事情读起来该仍然清晰体面。
+/// 淡化交给所在那一列，行本身不管。
 ///
-/// 改分类的入口只在这儿，不在沙漏视图的轴上：归属是横轴上的事，只在分类视图里定。
+/// 整行抓得动，落在哪儿就是哪件事：落在左列另一行上是换位置，落在 tab 栏某个分类上是改归属。
+/// 改分类与改写正文的入口都只在这儿，不在沙漏视图的轴上：轴上只看得见事情排在哪天。
 private struct TodoRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
     let tint: Color
     @State private var hovering = false
 
-    var body: some View {
-        HStack(spacing: 10) {
-            Button {
-                store.toggleTodo(todo)
-            } label: {
-                Image(systemName: todo.done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 16))
-                    .foregroundStyle(todo.done ? AnyShapeStyle(tint) : AnyShapeStyle(.tertiary))
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help(todo.done ? "取消完成" : "标记完成")
+    /// 正在就地改写这一行。改写时整行变成一个输入框，别的按钮让开 ——
+    /// 手正放在字上，旁边不该还浮着一个删除。
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var editorFocused: Bool
 
-            Text(todo.text)
-                .multilineTextAlignment(.leading)
+    /// 有另一行正悬在这一行上方。松手它就落到这一行的位置上。
+    @State private var targeted = false
+
+    /// 左列的行才排得动 —— 右列的顺序是完成日，不由人排，见 ADR-0002。
+    private var reorderable: Bool { !todo.done }
+
+    var body: some View {
+        HStack(spacing: TodoRowLayout.spacing) {
+            TodoToggle(done: todo.done, tint: tint) { store.toggleTodo(todo) }
+
+            text
 
             Spacer(minLength: 8)
 
@@ -169,25 +173,71 @@ private struct TodoRow: View {
                 PlannedDayControl(todo: todo, rowHovering: hovering)
             }
 
-            if hovering {
-                Button {
-                    withAnimation { store.deleteTodo(todo) }
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("删除")
+            // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
+            if hovering && !editing {
+                TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(hovering ? AnyShapeStyle(.quaternary.opacity(0.35)) : AnyShapeStyle(.clear))
+        .todoRowChrome(hovering: hovering)
+        // 落点指示与 tab 栏、沙漏视图里那圈一样是青色描边：「松手会落在这儿」三处是同一句话。
+        .overlay(
+            RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius)
+                .strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2)
         )
         .onHover { hovering = $0 }
-        .contextMenu { moveMenu }
+        .contextMenu {
+            Button("改写") { beginEditing() }
+            moveMenu
+        }
+        // 整行都抓得动，内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
+        // 已完成的也抓得动 —— 它排不了序，但照样可以拖到 tab 栏上换分类。
+        .contentShape(Rectangle())
+        // 点这一行就进改写 —— 正文那几个字不是唯一的入口，行里的空处点下去是同一件事。
+        // 圈、日期、删除都是按钮，各自先接住自己的那一下，不会落到这儿来。
+        .onTapGesture { if !editing { beginEditing() } }
+        .draggable(DraggedTodo(id: todo.id)) { TodoDragPreview(text: todo.text, tint: tint) }
+        .dropDestination(for: DraggedTodo.self) { dropped, _ in
+            // 一次拖一条 —— 这列没有多选，落下的就只会是刚才抓起的那一行。
+            guard reorderable, let dropped = dropped.first else { return false }
+            return store.reorderTodo(dropped.id, onto: todo.id)
+        } isTargeted: { targeted = reorderable && $0 }
+        .animation(.easeOut(duration: 0.12), value: targeted)
+    }
+
+    /// 正文。平时是一行字，点整行就地变成输入框 —— 改写发生在原位，不弹窗、不跳转。
+    @ViewBuilder
+    private var text: some View {
+        if editing {
+            TextField("", text: $draft)
+                .textFieldStyle(.plain)
+                .focused($editorFocused)
+                .onSubmit(commit)
+                // Esc 放弃这次改写，原文一字不动。
+                .onExitCommand(perform: cancel)
+                // 点到别处去了也算改完 —— 一次改写没有「没保存」这个下场。
+                .onChange(of: editorFocused) { _, focused in if !focused { commit() } }
+                .onAppear { editorFocused = true }
+        } else {
+            Text(todo.text)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    /// 开始改写：拿现在的正文当草稿，人于是接着改，而不是从空白重打一遍。
+    private func beginEditing() {
+        draft = todo.text
+        editing = true
+    }
+
+    /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路。
+    private func commit() {
+        guard editing else { return }
+        editing = false
+        store.editTodo(todo, to: draft)
+    }
+
+    private func cancel() {
+        editing = false
     }
 
     /// 「移到分类」：列出别的分类，选一个这条待办就归到那儿去。
