@@ -20,6 +20,74 @@ func squircle(rect: CGRect, n: Double = 5) -> CGPath {
     return path
 }
 
+/// 手绘的抖动：两个不同频的正弦叠加，相位由 seed 决定，每一笔抖得都不一样。
+/// 全部在 1024 的坐标系里算完再缩放 —— 十个尺寸抖的是同一只手，小图不会另抖出一套。
+func wobble(_ t: Double, seed: Double) -> Double {
+    3.2 * sin(t * 7.1 + seed * 1.93) + 2.1 * sin(t * 13.7 + seed * 3.71)
+}
+
+/// 一支会抖的钢笔。设计坐标沿用 y 向下的习惯（与草图一致），落笔时翻回 CG 的 y 向上。
+struct Pen {
+    let ctx: CGContext
+    let k: CGFloat
+
+    private func pt(_ x: Double, _ y: Double) -> CGPoint {
+        CGPoint(x: x * Double(k), y: (1024 - y) * Double(k))
+    }
+
+    /// 沿一条二次贝塞尔画一笔，笔迹沿法向轻微抖动。
+    func quad(_ p0: (Double, Double), _ c: (Double, Double), _ p1: (Double, Double),
+              width: Double, seed: Double) {
+        let path = CGMutablePath()
+        let steps = 48
+        for i in 0...steps {
+            let t = Double(i) / Double(steps), mt = 1 - t
+            var x = mt * mt * p0.0 + 2 * mt * t * c.0 + t * t * p1.0
+            var y = mt * mt * p0.1 + 2 * mt * t * c.1 + t * t * p1.1
+            let dx = 2 * mt * (c.0 - p0.0) + 2 * t * (p1.0 - c.0)
+            let dy = 2 * mt * (c.1 - p0.1) + 2 * t * (p1.1 - c.1)
+            let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
+            // 两端把抖动收到零：端点要落准（四条斜边在腰部几乎相接，端点一偏就交叉成 X），
+            // 手绘味交给中段。
+            let off = wobble(t, seed: seed) * min(1, 1.8 * sin(.pi * t))
+            x -= dy / len * off
+            y += dx / len * off
+            i == 0 ? path.move(to: pt(x, y)) : path.addLine(to: pt(x, y))
+        }
+        stroke(path, width: width)
+    }
+
+    /// 手抖版超椭圆环，半径随角度轻微起伏。抖动只用整数倍角频率，转一圈正好接回起点。
+    func squircleRing(r: Double, width: Double, seed: Double) {
+        let path = CGMutablePath()
+        let steps = 300
+        for i in 0...steps {
+            let t = Double(i) / Double(steps) * 2 * .pi
+            let rr = r + 3.0 * sin(3 * t + seed * 1.7) + 2.2 * sin(7 * t + seed * 2.9)
+            let ct = cos(t), st = sin(t)
+            let x = 512 + rr * pow(abs(ct), 2 / 5.0) * (ct < 0 ? -1 : 1)
+            let y = 512 + rr * pow(abs(st), 2 / 5.0) * (st < 0 ? -1 : 1)
+            i == 0 ? path.move(to: pt(x, y)) : path.addLine(to: pt(x, y))
+        }
+        path.closeSubpath()
+        stroke(path, width: width)
+    }
+
+    func dot(_ x: Double, _ y: Double, r: Double) {
+        let c = pt(x, y)
+        let rr = CGFloat(r) * k
+        ctx.fillEllipse(in: CGRect(x: c.x - rr, y: c.y - rr, width: 2 * rr, height: 2 * rr))
+    }
+
+    private func stroke(_ path: CGPath, width: Double) {
+        ctx.setLineWidth(CGFloat(width) * k)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+        ctx.addPath(path)
+        ctx.strokePath()
+    }
+}
+
 /// 画一个尺寸的图标。所有几何都按 1024 的比例算，于是每个尺寸都是矢量重绘，不是缩放。
 func drawIcon(size: Int) -> Data {
     let s = CGFloat(size)
@@ -34,56 +102,35 @@ func drawIcon(size: Int) -> Data {
 
     // 圆角方形：1024 画布里占 824，四边各留 100 —— 与系统图标的留白一致。
     let plate = CGRect(x: 100 * k, y: 100 * k, width: 824 * k, height: 824 * k)
-    let shape = squircle(rect: plate)
 
     // 不烤投影进来 —— Dock 和 Finder 会自己给图标加，烤进来只会在边上多出一圈暗环。
-    // 青色渐变：左上亮、右下沉。延续 app 整体的青色主调。
-    ctx.saveGState()
-    ctx.addPath(shape)
-    ctx.clip()
-    let grad = CGGradient(colorsSpace: cs, colors: [
-        CGColor(red: 0.40, green: 0.82, blue: 0.87, alpha: 1),
-        CGColor(red: 0.11, green: 0.51, blue: 0.62, alpha: 1),
-    ] as CFArray, locations: [0, 1])!
-    ctx.drawLinearGradient(grad, start: CGPoint(x: plate.minX, y: plate.maxY),
-                           end: CGPoint(x: plate.maxX, y: plate.minY), options: [])
-    ctx.restoreGState()
-
-    let cx = s / 2, cy = s / 2
-    ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-
-    // 沙漏：上下两个三角在腰部收拢，几乎相接 —— 缝太宽就读成两个三角，不是沙漏了。
-    let halfW = 130 * k       // 上下沿的半宽
-    let halfH = 208 * k       // 上下沿离中心的距离
-    let waist = 7 * k         // 腰部的缝隙半高
-    for sign in [CGFloat(1), -1] {
-        let tri = CGMutablePath()
-        tri.move(to: CGPoint(x: cx - halfW, y: cy + sign * halfH))
-        tri.addLine(to: CGPoint(x: cx + halfW, y: cy + sign * halfH))
-        tri.addLine(to: CGPoint(x: cx, y: cy + sign * waist))
-        tri.closeSubpath()
-        ctx.addPath(tri)
-        ctx.fillPath()
-    }
-
-    // 上下两道横杠，沙漏的框。
-    let capW = 156 * k, capH = 22 * k
-    for sign in [CGFloat(1), -1] {
-        let cap = CGRect(x: cx - capW, y: cy + sign * halfH - (sign > 0 ? 0 : capH),
-                         width: capW * 2, height: capH)
-        ctx.addPath(CGPath(roundedRect: cap, cornerWidth: capH / 2, cornerHeight: capH / 2,
-                           transform: nil))
-        ctx.fillPath()
-    }
-
-    // 今天那条线：横穿腰部，两头都伸出沙漏之外 —— 横轴（分类）与纵轴（时间）在这儿交叉，
-    // 而今天就锚在正中间。刻意画得细、半透明：一眼看见的该是沙漏，这条线是second read。
-    let lineW = 268 * k, lineH = 13 * k
-    let line = CGRect(x: cx - lineW, y: cy - lineH / 2, width: lineW * 2, height: lineH)
-    ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.82))
-    ctx.addPath(CGPath(roundedRect: line, cornerWidth: lineH / 2, cornerHeight: lineH / 2,
-                       transform: nil))
+    // 黑白手绘钢笔线稿：暖白的纸底，墨色的线。
+    let paper = CGColor(red: 0.992, green: 0.988, blue: 0.976, alpha: 1)
+    let ink = CGColor(red: 0.106, green: 0.102, blue: 0.094, alpha: 1)
+    ctx.addPath(squircle(rect: plate))
+    ctx.setFillColor(paper)
     ctx.fillPath()
+
+    ctx.setStrokeColor(ink)
+    ctx.setFillColor(ink)
+    let pen = Pen(ctx: ctx, k: k)
+
+    // 手绘的边框圈，替系统的圆角方形在纸上再描一遍 —— 白底图标在浅色 Dock 里靠它定形。
+    pen.squircleRing(r: 372, width: 15, seed: 1)
+
+    // 沙漏：上下两道横杠是框，四条斜边在腰部收拢。
+    pen.quad((356, 302), (512, 291), (668, 305), width: 24, seed: 2)
+    pen.quad((356, 724), (512, 734), (668, 720), width: 24, seed: 3)
+    pen.quad((384, 314), (448, 410), (506, 501), width: 24, seed: 4)
+    pen.quad((640, 312), (576, 410), (518, 501), width: 24, seed: 5)
+    pen.quad((384, 710), (448, 616), (506, 523), width: 24, seed: 6)
+    pen.quad((640, 712), (576, 616), (518, 523), width: 24, seed: 7)
+
+    // 下半的沙堆一弧，腰口落下的沙三点。
+    pen.quad((446, 700), (512, 648), (578, 701), width: 22, seed: 8)
+    pen.dot(512, 552, r: 9)
+    pen.dot(508, 592, r: 8)
+    pen.dot(515, 632, r: 7)
 
     let image = ctx.makeImage()!
     let rep = NSBitmapImageRep(cgImage: image)

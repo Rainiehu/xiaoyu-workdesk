@@ -57,7 +57,7 @@ swift Resources/makeicon.swift /tmp/AppIcon.iconset
 iconutil -c icns /tmp/AppIcon.iconset -o Resources/AppIcon.icns
 ```
 
-图案是沙漏加一条横穿腰部的今天线 —— 正是这个 app 的两条正交轴：纵轴是时间（今天锚在中间），横轴是分类。
+图案是一只黑白手绘的钢笔线稿沙漏 —— 时间是这个 app 的纵轴，沙漏的腰正是「今天」。暖白纸底、墨色线条，抖动在 1024 坐标系里算好再按比例缩放，十个尺寸抖的是同一只手。
 
 跑测试：
 
