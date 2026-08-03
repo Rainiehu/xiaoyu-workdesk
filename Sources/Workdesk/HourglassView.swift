@@ -16,8 +16,8 @@ import SwiftUI
 /// 轴上的条目可以直接拖到别的日期分组里去改期：调整安排是一个手势，不必点开日期面板。
 /// 拖拽只发生在这条轴的日期分组之间，也只改计划日 —— 归属哪个分类是横轴上的事，不因这一拖而变。
 ///
-/// 计划日在过去而未完成的待办与别的待办写法一模一样：不置顶、不变色、不加徽标、不自动顺延。
-/// 「过期」这个概念不存在，见 ADR-0001。要给它加提醒之前请先读那份 ADR。
+/// 计划日在过去而未完成的待办就是「过期」：留在它那一天，不置顶、不自动顺延、不催办，
+/// 唯一的痕迹是那一行的勾圈描成琥珀 —— 安静的记号，不是警报。见 ADR-0004（修订了 ADR-0001）。
 struct HourglassView: View {
     @Environment(Store.self) private var store
     @Environment(TodayClock.self) private var clock
@@ -58,29 +58,35 @@ struct HourglassView: View {
     /// 只有排了期的日子在轴上，条数不多，所以用 VStack 而不是 LazyVStack ——
     /// 打开时要滚到今天，那一组必须已经在布局里。
     private func timeline(today: Date) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(store.timeline(today: today)) { day in
-                        DayGroup(day: day, today: today)
-                            .id(day.day)
+        // 量的是轴那个视口自己的高，两头各留半屏 —— `scrollTo(anchor: .center)` 只在目标
+        // 两边都还有内容可滚时才居得了中，而今天常常就是轴上最后（或最早）的一天：
+        // 没有这两段余白，它就只能贴在边上。顺带滚到尽头时，最早/最晚的那一天
+        // 正好停在屏幕中线上 —— 与「今天锚在中线」说的是同一条线。
+        GeometryReader { geo in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(store.timeline(today: today)) { day in
+                            DayGroup(day: day, today: today)
+                                .id(day.day)
+                        }
                     }
+                    .padding(.horizontal, contentInset)
+                    .padding(.vertical, geo.size.height / 2)
+                    .frame(maxWidth: contentWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, contentInset)
-                .padding(.vertical, 24)
-                .frame(maxWidth: contentWidth, alignment: .leading)
-                .frame(maxWidth: .infinity)
-            }
-            .onAppear {
-                // 落在中间而不是顶上：过去与未来因此同时露在眼前，两头都摆明了可以滚。
-                proxy.scrollTo(today.dayStart, anchor: .center)
-            }
-            // 过了一天就重新锚回今天，跟刚打开一样 —— 这台窗口常常一开就是几天，
-            // 隔夜回来时停在昨天那一屏，看到的就是一份对不上的安排。
-            // `today` 只在日子变了时才动（见 `TodayClock`），所以这句不会被时刻的走动惊动。
-            .onChange(of: today) { _, now in
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    proxy.scrollTo(now.dayStart, anchor: .center)
+                .onAppear {
+                    // 落在中间而不是顶上：过去与未来因此同时露在眼前，两头都摆明了可以滚。
+                    proxy.scrollTo(today.dayStart, anchor: .center)
+                }
+                // 过了一天就重新锚回今天，跟刚打开一样 —— 这台窗口常常一开就是几天，
+                // 隔夜回来时停在昨天那一屏，看到的就是一份对不上的安排。
+                // `today` 只在日子变了时才动（见 `TodayClock`），所以这句不会被时刻的走动惊动。
+                .onChange(of: today) { _, now in
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo(now.dayStart, anchor: .center)
+                    }
                 }
             }
         }
@@ -159,7 +165,8 @@ private struct RecordingCategoryPicker: View {
 }
 
 /// 轴上的一天：一个日期头，下面是这天的待办。
-/// 今天这一组用强调样式，它是锚点；别的日子一律同一副模样。
+/// 今天这一组用强调样式，它是锚点；过去的组铺一块中性的沉降底色 —— 落了的沙有质地；
+/// 未来的日子干干净净，什么也不铺。
 ///
 /// 每一组同时是一个落点：条目拖到这儿松手，它的计划日就是这一天。
 private struct DayGroup: View {
@@ -171,6 +178,9 @@ private struct DayGroup: View {
     @State private var targeted = false
 
     private var isToday: Bool { day.day.isSameDay(as: today) }
+
+    /// 这一组在今天之前。比的是哪一天不是哪一刻，与 `TodoItem.isOverdue(today:)` 同一条规矩。
+    private var isPast: Bool { day.day.dayStart < today.dayStart }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -188,11 +198,17 @@ private struct DayGroup: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // 内缩每一组都留着，只有底色跟着今天变 —— 强调今天不该顺带把那一组的条目挪位置。
+        // 内缩每一组都留着，只有底色跟着日子变 —— 强调今天不该顺带把那一组的条目挪位置。
+        // 过去铺中性灰、今天铺青、未来不铺：滚到哪儿都一眼知道自己在时间的哪一侧，
+        // 而青底仍然只有今天那一块 —— 灰是没有彩色的，这一屏该抢眼的还是「今天」。
+        // 灰要淡过悬停底色（quaternary 的 0.35），行上的悬停在它上头才盖得住。
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(isToday ? AnyShapeStyle(.teal.opacity(0.08)) : AnyShapeStyle(.clear))
+                .fill(
+                    isToday
+                        ? AnyShapeStyle(.teal.opacity(0.08))
+                        : isPast ? AnyShapeStyle(.quaternary.opacity(0.25)) : AnyShapeStyle(.clear))
         )
         // 落点指示画在外圈：整组连同日期头一起框起来，「松手会落在这一天」于是说得明明白白，
         // 而底色留给今天那个锚点 —— 两件事各说各的，不会看混。
@@ -249,7 +265,9 @@ private struct TimelineRow: View {
 
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
-            TodoToggle(done: todo.done, tint: tint) { store.toggleTodo(todo) }
+            TodoToggle(done: todo.done, overdue: todo.isOverdue(today: today), tint: tint) {
+                store.toggleTodo(todo)
+            }
 
             TodoText(todo: todo, editing: $editing)
                 .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))

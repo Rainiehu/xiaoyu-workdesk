@@ -26,12 +26,17 @@ enum TodoRowLayout {
 /// 一条待办的完成状态：空心圈是还没做，实心勾圈是做完了，点一下就翻面。
 ///
 /// 已完成的圈填成这条待办所属分类的颜色 —— 打勾于是把这一行「点亮」成它的分类色。
-/// 未完成的一律是灰圈：那时颜色还没什么好说的，而一行上只该有一处彩色抢眼。
+/// 未完成的是灰圈：那时颜色还没什么好说的，而一行上只该有一处彩色抢眼。
+/// 唯一的例外是过期（未完成且计划日已过，见 ADR-0004）：描边换成琥珀 ——
+/// 过期是完成状态的一层，所以记号长在说完成状态的这个圈上，打勾那一下顺手把它抹掉。
 ///
 /// 画哪个状态由调用方给，不自己去问 `todo.done` —— 未排期列里打完勾的那条要先亮一下再走，
 /// 那一拍里圈画的是「已完成」，而待办本身还没变。
 struct TodoToggle: View {
     let done: Bool
+    /// 过期了。只换没打勾时描边的颜色，别的一概不动 —— 这是个安静的记号，不是警报。
+    /// 未排期列不传：那儿的待办没有计划日，谈不上过没过。
+    var overdue: Bool = false
     /// 打勾之后填的颜色，就是这条待办所属分类的颜色。
     let tint: Color
     let toggle: () -> Void
@@ -40,12 +45,26 @@ struct TodoToggle: View {
         Button(action: toggle) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 16))
-                .foregroundStyle(done ? AnyShapeStyle(tint) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(circleStyle)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help(done ? "取消完成" : "标记完成")
     }
+
+    private var circleStyle: AnyShapeStyle {
+        if done { return AnyShapeStyle(tint) }
+        return overdue ? AnyShapeStyle(Color.overdueAmber) : AnyShapeStyle(.tertiary)
+    }
+}
+
+extension Color {
+    /// 过期记号的琥珀。刻意不取分类色板里的 amber —— 那是某个分类的记号，这是一层状态，
+    /// 撞了色就分不清「这行属于琥珀色的分类」和「这行过期了」，所以压灰压暗一档，弱提醒不抢戏。
+    /// 浅色外观深一档、深色外观浅一档，与分类色板同一条纪律。
+    static let overdueAmber = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(rgb: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? 0xD9A558 : 0xC2801F)
+    })
 }
 
 /// 悬停时浮出的删除。三处摆在同一个位置上：行尾那个常驻元素的左边 ——

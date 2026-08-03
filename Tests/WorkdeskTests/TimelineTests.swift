@@ -117,7 +117,8 @@ struct TimelineTests {
         }
     }
 
-    /// 「不存在过期」这条取舍在派生数据这一层就成立，见 ADR-0001。
+    /// 过期只是行上的一个安静记号（见 ADR-0004），在派生数据这一层没有任何特殊待遇：
+    /// 不顺延、不置顶，这半条 ADR-0001 仍然有效。
     @Test("计划日在过去而未完成的待办留在它那一天，不顺延也不置顶")
     func pastUnfinishedTodosStayPut() throws {
         try withTemporaryDirectory { dir in

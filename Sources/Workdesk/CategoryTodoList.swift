@@ -156,7 +156,9 @@ private struct TodoRow: View {
 
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
-            TodoToggle(done: todo.done, tint: tint) { store.toggleTodo(todo) }
+            TodoToggle(done: todo.done, overdue: todo.isOverdue(today: clock.today), tint: tint) {
+                store.toggleTodo(todo)
+            }
 
             TodoText(todo: todo, editing: $editing)
 

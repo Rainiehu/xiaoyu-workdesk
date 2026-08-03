@@ -4,8 +4,8 @@ import SwiftUI
 /// 未排期的，静止时完全干净，只在悬停时浮出一个日历图标。两种模样点开的是同一个面板 ——
 /// 排期与改期不是两件事。
 ///
-/// 计划日在过去还是将来，写法一模一样：不置顶、不变色、不加徽标。
-/// 「过期」这个概念在这里不存在，见 ADR-0001。
+/// 计划日在过去还是将来，这个日期标签的写法一模一样：不变色、不加徽标 ——
+/// 过期的记号只有一处，在那一行的勾圈上（描成琥珀），不在这儿再说一遍。见 ADR-0004。
 struct PlannedDayControl: View {
     @Environment(TodayClock.self) private var clock
     let todo: TodoItem
