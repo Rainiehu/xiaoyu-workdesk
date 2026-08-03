@@ -76,6 +76,9 @@ struct HourglassView: View {
                     .frame(maxWidth: contentWidth, alignment: .leading)
                     .frame(maxWidth: .infinity)
                 }
+                // 不画滚动条:两头的半屏余白把内容撑得老长，滚动条一常驻就是轴中间一根粗杠。
+                // 这条轴的位置感由「今天」的锚点给，不靠滚动条说。
+                .scrollIndicators(.hidden)
                 .onAppear {
                     // 落在中间而不是顶上：过去与未来因此同时露在眼前，两头都摆明了可以滚。
                     proxy.scrollTo(today.dayStart, anchor: .center)
@@ -165,8 +168,8 @@ private struct RecordingCategoryPicker: View {
 }
 
 /// 轴上的一天：一个日期头，下面是这天的待办。
-/// 今天这一组用强调样式，它是锚点；过去的组铺一块中性的沉降底色 —— 落了的沙有质地；
-/// 未来的日子干干净净，什么也不铺。
+/// 今天这一组用强调样式，它是锚点；别的日子一律同一副模样 ——
+/// 过去试过铺一块沉降的灰底，上手看着闹，去掉了：过去认不认得出，交给位置和琥珀圈就够。
 ///
 /// 每一组同时是一个落点：条目拖到这儿松手，它的计划日就是这一天。
 private struct DayGroup: View {
@@ -178,9 +181,6 @@ private struct DayGroup: View {
     @State private var targeted = false
 
     private var isToday: Bool { day.day.isSameDay(as: today) }
-
-    /// 这一组在今天之前。比的是哪一天不是哪一刻，与 `TodoItem.isOverdue(today:)` 同一条规矩。
-    private var isPast: Bool { day.day.dayStart < today.dayStart }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -198,17 +198,11 @@ private struct DayGroup: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // 内缩每一组都留着，只有底色跟着日子变 —— 强调今天不该顺带把那一组的条目挪位置。
-        // 过去铺中性灰、今天铺青、未来不铺：滚到哪儿都一眼知道自己在时间的哪一侧，
-        // 而青底仍然只有今天那一块 —— 灰是没有彩色的，这一屏该抢眼的还是「今天」。
-        // 灰要淡过悬停底色（quaternary 的 0.35），行上的悬停在它上头才盖得住。
+        // 内缩每一组都留着，只有底色跟着今天变 —— 强调今天不该顺带把那一组的条目挪位置。
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(
-                    isToday
-                        ? AnyShapeStyle(.teal.opacity(0.08))
-                        : isPast ? AnyShapeStyle(.quaternary.opacity(0.25)) : AnyShapeStyle(.clear))
+                .fill(isToday ? AnyShapeStyle(.teal.opacity(0.08)) : AnyShapeStyle(.clear))
         )
         // 落点指示画在外圈：整组连同日期头一起框起来，「松手会落在这一天」于是说得明明白白，
         // 而底色留给今天那个锚点 —— 两件事各说各的，不会看混。
