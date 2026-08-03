@@ -25,6 +25,18 @@ struct HourglassView: View {
     @State private var draft = ""
     @FocusState private var inputFocused: Bool
 
+    /// 今天那一组在轴内容里的纵向中点，和轴内容的总高，都是从布局里量出来的：
+    /// 「按需垫高」要拿它们算出两头各差多少才够把今天顶到中线（见 `endInsets`）。
+    @State private var todayCenterY: CGFloat?
+    @State private var contentHeight: CGFloat?
+
+    /// 中线上锚着哪一天。打开时指今天；用户一滚，`scrollPosition` 就把它改指中线上的那一天。
+    @State private var anchorDay: Date?
+
+    /// 量「今天在哪」用的坐标系：挂在轴内容的 VStack 上、垫高之内，
+    /// 量出来的位置因此不含垫高 —— 垫高正是要拿这个位置去算的，不能让它反过来搅了测量。
+    private static let contentSpace = "hourglassTimeline"
+
     /// 轴与输入区共同的内容宽度上限与内缩。写在一处，两者因此左右对齐 ——
     /// 输入框看着就是这条轴的开头，不是浮在它上面的另一块东西。
     private let contentWidth: CGFloat = 640
@@ -58,41 +70,68 @@ struct HourglassView: View {
     /// 只有排了期的日子在轴上，条数不多，所以用 VStack 而不是 LazyVStack ——
     /// 打开时要滚到今天，那一组必须已经在布局里。
     private func timeline(today: Date) -> some View {
-        // 量的是轴那个视口自己的高，两头各留半屏 —— `scrollTo(anchor: .center)` 只在目标
-        // 两边都还有内容可滚时才居得了中，而今天常常就是轴上最后（或最早）的一天：
-        // 没有这两段余白，它就只能贴在边上。顺带滚到尽头时，最早/最晚的那一天
-        // 正好停在屏幕中线上 —— 与「今天锚在中线」说的是同一条线。
+        // 「今天锚在中线」要求今天两侧各有半屏内容可滚，不够的那一侧拿空白垫 ——
+        // 但只垫差的那一截（`endInsets`）：过去往往早超过半屏，顶上就一点不垫，
+        // 滚到头就是最早那一天，而不是半屏说不清的空白。真垫了余白的时候（今天自己
+        // 就是轴的尽头），那段空白是有含义的：滚到底，中线上正锚着今天。
         GeometryReader { geo in
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(store.timeline(today: today)) { day in
-                            DayGroup(day: day, today: today)
-                                .id(day.day)
-                        }
+            let insets = endInsets(half: geo.size.height / 2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(store.timeline(today: today)) { day in
+                        DayGroup(day: day, today: today)
+                            .id(day.day)
+                            .onGeometryChange(for: CGFloat.self) {
+                                $0.frame(in: .named(Self.contentSpace)).midY
+                            } action: { midY in
+                                // 每一组都在量，但只记今天的 —— 哪一组是今天由数据说，
+                                // 位置变了（上面添了行、隔了夜）这里自然跟着更新。
+                                if day.day.isSameDay(as: today) { todayCenterY = midY }
+                            }
                     }
-                    .padding(.horizontal, contentInset)
-                    .padding(.vertical, geo.size.height / 2)
-                    .frame(maxWidth: contentWidth, alignment: .leading)
-                    .frame(maxWidth: .infinity)
                 }
-                // 不画滚动条:两头的半屏余白把内容撑得老长，滚动条一常驻就是轴中间一根粗杠。
-                // 这条轴的位置感由「今天」的锚点给，不靠滚动条说。
-                .scrollIndicators(.hidden)
-                .onAppear {
-                    // 落在中间而不是顶上：过去与未来因此同时露在眼前，两头都摆明了可以滚。
-                    proxy.scrollTo(today.dayStart, anchor: .center)
+                .scrollTargetLayout()
+                .coordinateSpace(name: Self.contentSpace)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    contentHeight = $0
                 }
-                // 过了一天就重新锚回今天，跟刚打开一样 —— 这台窗口常常一开就是几天，
-                // 隔夜回来时停在昨天那一屏，看到的就是一份对不上的安排。
-                // `today` 只在日子变了时才动（见 `TodayClock`），所以这句不会被时刻的走动惊动。
-                .onChange(of: today) { _, now in
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        proxy.scrollTo(now.dayStart, anchor: .center)
-                    }
+                .padding(.horizontal, contentInset)
+                .padding(.top, insets.top)
+                .padding(.bottom, insets.bottom)
+                .frame(maxWidth: contentWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
+            }
+            // 锚点是声明的不是滚出来的：打开时把今天顶到中线，之后垫高一收、内容挪位，
+            // 系统自己维持锚定，不用抢在布局前后掐时机再滚一把。
+            // 用户一滚，绑定就跟着改指中线上的那一天 —— 锚从此归手势管，不会又被拽回今天。
+            .scrollPosition(id: $anchorDay, anchor: .center)
+            // 不画滚动条：这条轴的位置感由「今天」的锚点给，不靠滚动条说；
+            // 真垫了余白的日子，常驻的滚动条也只会是轴中间一根说不清的粗杠。
+            .scrollIndicators(.hidden)
+            .onAppear {
+                // 落在中间而不是顶上：过去与未来因此同时露在眼前，两头都摆明了可以滚。
+                anchorDay = today.dayStart
+            }
+            // 过了一天就重新锚回今天，跟刚打开一样 —— 这台窗口常常一开就是几天，
+            // 隔夜回来时停在昨天那一屏，看到的就是一份对不上的安排。
+            // `today` 只在日子变了时才动（见 `TodayClock`），所以这句不会被时刻的走动惊动。
+            .onChange(of: today) { _, now in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    anchorDay = now.dayStart
                 }
             }
         }
+    }
+
+    /// 轴两头按需垫的空白：今天哪一侧的内容不够半屏，就在那头垫上差的那一截，
+    /// 够了的一侧一点不垫 —— `scrollTo(anchor: .center)` 只在目标两边都还有内容可滚时
+    /// 才居得了中，这两段垫的就是「可滚」的下限。还没量出今天在哪之前先按半屏垫着
+    /// （等于从前的行为），量到了再收 —— 所以这里的空白只会少、不会多。
+    private func endInsets(half: CGFloat) -> (top: CGFloat, bottom: CGFloat) {
+        guard let center = todayCenterY, let height = contentHeight else {
+            return (half, half)
+        }
+        return (max(0, half - center), max(0, half - (height - center)))
     }
 
     /// 记事的那一条：输入框，旁边是记到哪个分类。
