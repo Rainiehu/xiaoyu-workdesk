@@ -8,7 +8,7 @@ struct WorkdeskApp: App {
     @State private var clock = TodayClock()
 
     var body: some Scene {
-        WindowGroup("我的工作台") {
+        WindowGroup("案头") {
             ContentView()
                 .environment(store)
                 .environment(clock)

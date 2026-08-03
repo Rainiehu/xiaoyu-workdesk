@@ -1,11 +1,11 @@
 #!/bin/bash
-# 编译并组装 Workdesk.app（./build/我的工作台.app）
+# 编译并组装 Workdesk.app（./build/案头.app）
 set -e
 cd "$(dirname "$0")"
 
 swift build -c release
 
-APP="build/我的工作台.app"
+APP="build/案头.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
@@ -21,8 +21,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <dict>
     <key>CFBundleExecutable</key><string>Workdesk</string>
     <key>CFBundleIdentifier</key><string>cc.huxiaoyu.workdesk</string>
-    <key>CFBundleName</key><string>我的工作台</string>
-    <key>CFBundleDisplayName</key><string>我的工作台</string>
+    <key>CFBundleName</key><string>案头</string>
+    <key>CFBundleDisplayName</key><string>案头</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>

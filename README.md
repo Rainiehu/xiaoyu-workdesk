@@ -1,4 +1,4 @@
-# 我的工作台 · Workdesk
+# 案头 · Workdesk
 
 一个清新简洁的 macOS 个人桌面工作台，用 SwiftUI 原生构建。
 
@@ -15,17 +15,17 @@
 
 ```bash
 ./build.sh
-open "build/我的工作台.app"
+open "build/案头.app"
 ```
 
-`build.sh` 会以 release 模式编译并组装出 `build/我的工作台.app`，把图标放进去，并做一次 ad-hoc 签名。ad-hoc 签名只够本机自己跑 —— 拷给别人时对方仍会被 Gatekeeper 拦下，得右键「打开」。
+`build.sh` 会以 release 模式编译并组装出 `build/案头.app`，把图标放进去，并做一次 ad-hoc 签名。ad-hoc 签名只够本机自己跑 —— 拷给别人时对方仍会被 Gatekeeper 拦下，得右键「打开」。
 
 ### 装进 /Applications
 
 只装一次，之后 `./build.sh` 就直接生效，不用再拷：
 
 ```bash
-ln -s "$PWD/build/我的工作台.app" "/Applications/我的工作台.app"
+ln -s "$PWD/build/案头.app" "/Applications/案头.app"
 ```
 
 `/Applications` 里放的是软链接，app 实体始终只有仓库里这一份 —— 不会出现装好的那份悄悄落后于代码。代价是这个仓库不能随便移走或删掉，否则链接就断了。
