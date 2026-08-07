@@ -21,7 +21,7 @@ enum SyncTrouble: Equatable {
     var explanation: String {
         switch self {
         case .noAccount:
-            "这台 Mac 没有登录 iCloud，收藏暂时只在本机。\n登录之后同步自己会接上，本机的一切完好。"
+            "这台 Mac 没有登录 iCloud，改动暂时只在本机。\n登录之后同步自己会接上，本机的一切完好。"
         case .quotaExceeded:
             "iCloud 储存空间满了，新的改动暂时推不上去。\n本机的一切完好，云端腾出地方后会自动补上。"
         case .stale(let days):
@@ -30,12 +30,10 @@ enum SyncTrouble: Equatable {
     }
 }
 
-/// 把收藏在本机与 iCloud 之间逐条推拉的引擎。`Store` 的本地 JSON 永远是界面唯一的
-/// 事实来源，这里只做两件事：把账本上的欠账发出去，把云端来的改动交回 `Store`。
+/// 把待办、分类与收藏在本机与 iCloud 之间逐条推拉的引擎。`Store` 的本地 JSON 永远是
+/// 界面唯一的事实来源，这里只做两件事：把账本上的欠账发出去，把云端来的改动交回 `Store`。
 /// 断网、没登录、构建没带 iCloud 权限 —— 引擎都一声不吭，app 照旧是完整的单机 app。
-///
-/// 机制是给所有同步数据设计的，眼下只挂了收藏；#35 往 `SyncSchema` 加记录类型、
-/// 在这里的取货与落地两处各加一个分支就够。
+/// 偏好与用量不在此列：那是每台机器自己的事，一个字节也不上云。
 @Observable
 @MainActor
 final class CloudSync: CKSyncEngineDelegate {
@@ -87,6 +85,7 @@ final class CloudSync: CKSyncEngineDelegate {
         let saved = loadSavedState()
         engineState = saved?.stateSerialization
         lastSuccessAt = saved?.lastSuccessAt ?? .now
+        systemFields = saved?.systemFields ?? [:]
         startEngine()
         // 账本添了新账就交给引擎一份 —— 发不发、什么时候发，是引擎自己的节奏。
         store.syncLogDidChange = { [weak self] in self?.enqueuePending() }
@@ -103,10 +102,10 @@ final class CloudSync: CKSyncEngineDelegate {
         )
         engine = CKSyncEngine(configuration)
         if engineState == nil {
-            // 头一次（或换了账号重来）：自建 zone 要先立起来，本地已有的收藏也都得记上账 ——
-            // 它们收藏于同步存在之前，从没进过账本。
+            // 头一次（或换了账号重来）：自建 zone 要先立起来，本地已有的存量数据也都得
+            // 记上账 —— 它们落盘于同步存在之前，从没进过账本。
             engine?.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: SyncSchema.zoneID))])
-            store.enqueueAllFavoritesForSync()
+            store.enqueueAllForSync()
         }
         enqueuePending()
         Task { await refreshAccountStatus(container) }
@@ -159,10 +158,18 @@ final class CloudSync: CKSyncEngineDelegate {
         let scope = context.options.scope
         let pending = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
         // 先在主线程把货备齐 —— 引擎按条取货的回调不在主线程上，不去那儿现找 `Store`。
+        // 记录名是 UUID，不会跨类型撞车，三类挨个问过去就是。
         var records: [CKRecord.ID: CKRecord] = [:]
         for case .saveRecord(let recordID) in pending {
-            if let favorite = store.favorite(recordName: recordID.recordName) {
-                records[recordID] = favorite.makeRecord()
+            let name = recordID.recordName
+            // 打在上次见过的服务端记录上（带着系统字段），云端才认得出这是一次改而不是撞车。
+            let base = baseRecord(named: name)
+            if let todo = store.todo(recordName: name) {
+                records[recordID] = todo.makeRecord(onto: base)
+            } else if let found = store.category(recordName: name) {
+                records[recordID] = found.category.makeRecord(position: found.position, onto: base)
+            } else if let favorite = store.favorite(recordName: name) {
+                records[recordID] = favorite.makeRecord(onto: base)
             } else {
                 // 本地已经没有这条了（多半是没发出去就被删了）—— 这次保存没有要说的事。
                 syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
@@ -182,30 +189,57 @@ final class CloudSync: CKSyncEngineDelegate {
             handleAccountChange(change.changeType)
 
         case .fetchedRecordZoneChanges(let changes):
-            for modification in changes.modifications {
-                if let item = FavoriteItem(record: modification.record) {
-                    store.applyRemoteFavorite(item)
+            for record in Self.landingOrder(changes.modifications.map(\.record)) {
+                switch record.recordType {
+                case SyncSchema.todoType:
+                    if let item = TodoItem(record: record) { store.applyRemoteTodo(item) }
+                case SyncSchema.categoryType:
+                    if let category = Workdesk.Category(record: record) {
+                        store.applyRemoteCategory(category, position: Workdesk.Category.position(in: record))
+                    }
+                case SyncSchema.favoriteType:
+                    if let item = FavoriteItem(record: record) { store.applyRemoteFavorite(item) }
+                default:
+                    break
                 }
+                // 云端交来的就是此刻服务端的样子 —— 记下系统字段，本地下次改它时打在这上面。
+                rememberSystemFields(of: record)
             }
-            for deletion in changes.deletions where deletion.recordType == SyncSchema.favoriteType {
-                store.applyRemoteFavoriteDeletion(recordName: deletion.recordID.recordName)
+            for deletion in changes.deletions {
+                switch deletion.recordType {
+                case SyncSchema.todoType:
+                    store.applyRemoteTodoDeletion(recordName: deletion.recordID.recordName)
+                case SyncSchema.categoryType:
+                    store.applyRemoteCategoryDeletion(recordName: deletion.recordID.recordName)
+                case SyncSchema.favoriteType:
+                    store.applyRemoteFavoriteDeletion(recordName: deletion.recordID.recordName)
+                default:
+                    break
+                }
+                systemFields[deletion.recordID.recordName] = nil
             }
             markSuccess()
 
         case .fetchedDatabaseChanges(let changes):
             // zone 在云端被整个删了（比如从 iCloud 设置里清掉了 app 数据）：
             // 本地是事实来源，就把 zone 重新立起来、东西照账补回去。
+            // 记着的系统字段全部作废 —— 那些记录在云端已经不存在，得当新记录重新打。
             for deletion in changes.deletions where deletion.zoneID == SyncSchema.zoneID {
                 syncEngine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: SyncSchema.zoneID))])
-                store.enqueueAllFavoritesForSync()
+                systemFields = [:]
+                persistSavedState()
+                store.enqueueAllForSync()
             }
 
         case .sentRecordZoneChanges(let sent):
             for record in sent.savedRecords {
                 store.settleSyncSave(recordName: record.recordID.recordName)
+                // 保存成功交回来的记录带着新的系统字段 —— 记下，下次改它时打在这上面。
+                rememberSystemFields(of: record)
             }
             for recordID in sent.deletedRecordIDs {
                 store.settleSyncDelete(recordName: recordID.recordName)
+                systemFields[recordID.recordName] = nil
             }
             var sawQuotaFailure = false
             for failure in sent.failedRecordSaves {
@@ -224,6 +258,8 @@ final class CloudSync: CKSyncEngineDelegate {
             }
             quotaBlocked = sawQuotaFailure
             if !sent.savedRecords.isEmpty || !sent.deletedRecordIDs.isEmpty { markSuccess() }
+            // 这一轮记下的系统字段落个盘（markSuccess 顺路存过的话，再存一次也无妨）。
+            persistSavedState()
             // 没结清的账（网络抖动、zone 重建之类）再交一遍，引擎按它自己的退避节奏重试。
             enqueuePending()
 
@@ -243,6 +279,19 @@ final class CloudSync: CKSyncEngineDelegate {
         }
     }
 
+    /// 一批抓来的记录该按什么次序落地。抓取不保证次序，落地讲究：
+    /// 分类先落 —— 待办要归属存在的分类才落得下去，一批里没带分类的照样安全
+    /// （没处落的待办去 `Store` 那儿候着）；分类之间按位置从小到大 ——
+    /// 落地是逐条「插到第几位」，从小到大插，插完的一排才是记录说的那一排。
+    nonisolated static func landingOrder(_ records: [CKRecord]) -> [CKRecord] {
+        func rank(_ record: CKRecord) -> (Int, Int) {
+            record.recordType == SyncSchema.categoryType
+                ? (0, Category.position(in: record))
+                : (1, 0)
+        }
+        return records.sorted { rank($0) < rank($1) }
+    }
+
     /// 处理一条保存失败。返回这条是不是撞上了配额。
     private func handleSaveFailure(
         _ failure: CKSyncEngine.Event.SentRecordZoneChanges.FailedRecordSave, engine: CKSyncEngine
@@ -250,17 +299,28 @@ final class CloudSync: CKSyncEngineDelegate {
         let name = failure.record.recordID.recordName
         switch failure.error.code {
         case .serverRecordChanged:
-            // 云端已经有这条了。收藏没有编辑，两份说的必然是同一件事 —— 接受云端那份，销账。
-            if let server = failure.error.serverRecord, let item = FavoriteItem(record: server) {
-                store.applyRemoteFavorite(item)
+            // 撞上了云端更新的版本。这张票的冲突规矩是整条记录后写胜（字段级合并是 #36 的事）：
+            // 本地这份是刚写下的、更晚 —— 记下服务端的系统字段，账挂着不销，
+            // 下一轮打在它上面重发，本地版整条盖过去。
+            // 收藏例外：它没有编辑，两份说的必然是同一件事 —— 接受云端那份，销账。
+            guard let server = failure.error.serverRecord else { break }
+            if server.recordType == SyncSchema.favoriteType {
+                if let item = FavoriteItem(record: server) { store.applyRemoteFavorite(item) }
+                store.settleSyncSave(recordName: name)
+            } else {
+                rememberSystemFields(of: server)
+                persistSavedState()
             }
-            store.settleSyncSave(recordName: name)
         case .unknownItem:
             // 云端连它的墓都立好了 —— 那边的删除还在路上，这次保存不必坚持。
             store.settleSyncSave(recordName: name)
+            systemFields[name] = nil
         case .zoneNotFound:
-            // zone 还没立起来（或被删了）。先立 zone，账还挂着，下一轮再发。
+            // zone 还没立起来（或被删了）。先立 zone，账还挂着，下一轮再发 ——
+            // 记着的系统字段全部作废：连 zone 都没了，那些记录只能当新的重新打。
             engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: SyncSchema.zoneID))])
+            systemFields = [:]
+            persistSavedState()
         case .quotaExceeded:
             return true
         default:
@@ -280,10 +340,11 @@ final class CloudSync: CKSyncEngineDelegate {
         case .signOut:
             accountAvailable = false
         case .switchAccounts:
-            // 换了个人。本地照样是事实来源：引擎状态推倒重来，本地的收藏全数记账，
-            // 推给新账号的库，云端有的照常合并进来。
+            // 换了个人。本地照样是事实来源：引擎状态推倒重来，本地的一切全数记账，
+            // 推给新账号的库，云端有的照常合并进来。系统字段说的是上一个账号的库，作废。
             accountAvailable = true
             engineState = nil
+            systemFields = [:]
             persistSavedState()
             startEngine()
         @unknown default:
@@ -322,6 +383,33 @@ final class CloudSync: CKSyncEngineDelegate {
         staleDays = lastSuccessAt.flatMap { Self.staleDays(since: $0, now: .now) }
     }
 
+    // MARK: - 服务端记录的系统字段
+
+    /// 每条记录上次从服务端见过的样子（只留系统字段），按记录名存。改一条云端已有的记录，
+    /// 得打在带着它系统字段的底子上 —— 空手打一条新的去改旧的，每次都要撞
+    /// `serverRecordChanged`。收藏当年不带它也行（收藏没有编辑），待办与分类不行。
+    /// 丢了也不丢数据 —— 只是下一次保存要多绕一趟冲突。
+    private var systemFields: [String: Data] = [:]
+
+    /// 记下这条记录的系统字段。字段值不留 —— 那是 `Store` 的事，这儿只留云端的凭据。
+    private func rememberSystemFields(of record: CKRecord) {
+        let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+        record.encodeSystemFields(with: archiver)
+        systemFields[record.recordID.recordName] = archiver.encodedData
+    }
+
+    /// 还原成可以往上打字段的底子记录。没见过（云端还没有这条）就是 `nil`，那就打新的。
+    private func baseRecord(named name: String) -> CKRecord? {
+        guard let data = systemFields[name] else { return nil }
+        return Self.decodeSystemFields(data)
+    }
+
+    /// 从归档的系统字段解回 `CKRecord`。解不出就当没见过 —— 顶多多绕一趟冲突。
+    nonisolated static func decodeSystemFields(_ data: Data) -> CKRecord? {
+        guard let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
+        return CKRecord(coder: unarchiver)
+    }
+
     // MARK: - 引擎状态落盘
 
     /// 引擎的状态序列化。落盘它是引擎能逐条增量推拉的前提 —— 丢了也不丢数据，
@@ -331,6 +419,8 @@ final class CloudSync: CKSyncEngineDelegate {
     private struct SavedState: Codable {
         var stateSerialization: CKSyncEngine.State.Serialization?
         var lastSuccessAt: Date?
+        /// 可空只是为了读得进 #34 落盘的旧文件 —— 那时还没有这一项。
+        var systemFields: [String: Data]?
     }
 
     private var savedStateURL: URL {
@@ -343,7 +433,9 @@ final class CloudSync: CKSyncEngineDelegate {
     }
 
     private func persistSavedState() {
-        let state = SavedState(stateSerialization: engineState, lastSuccessAt: lastSuccessAt)
+        let state = SavedState(
+            stateSerialization: engineState, lastSuccessAt: lastSuccessAt, systemFields: systemFields
+        )
         if let data = try? JSONEncoder().encode(state) {
             try? data.write(to: savedStateURL, options: .atomic)
         }
