@@ -2,17 +2,31 @@ import SwiftUI
 
 @main
 struct WorkdeskApp: App {
-    @State private var store = Store()
+    @State private var store: Store
     /// 「今天是哪天」的那一个来源。整条主线共用它 —— 各处各问一次时钟的话，
     /// 跨过零点就会有的地方跟上了、有的地方还停在昨天。
     @State private var clock = TodayClock()
+    @State private var sync: CloudSync
+
+    init() {
+        // 存储目录可以用环境变量指到别处 —— 同一台 Mac 跑两个实例（不同目录、
+        // 同一个 iCloud 账号）验证同步，靠的就是这个口子；不设就是平时那个位置。
+        let directory = ProcessInfo.processInfo.environment["WORKDESK_DATA_DIR"]
+            .map { URL(fileURLWithPath: $0, isDirectory: true) } ?? Store.defaultDirectory
+        let store = Store(directory: directory)
+        _store = State(initialValue: store)
+        _sync = State(initialValue: CloudSync(store: store, directory: directory))
+    }
 
     var body: some Scene {
         WindowGroup("案头") {
             ContentView()
                 .environment(store)
                 .environment(clock)
+                .environment(sync)
                 .frame(minWidth: 860, minHeight: 560)
+                // 同步在这儿点火。没带 iCloud 权限的构建里它什么也不做 —— app 照旧是单机 app。
+                .task { sync.start() }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1000, height: 660)
