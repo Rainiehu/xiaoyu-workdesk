@@ -6,7 +6,7 @@
 
 - **主线** — 待办按自建的分类组织，分类以顶部 tab 呈现，新建只需输入名字、颜色自动分配；tab 上右键可改名、换色、删除，拖着 tab 就调顺序；点进一个分类就看到左右两列，左边待完成、右边已完成，敲字回车记事，打勾完成、悬停删除，双击正文就地改写；左列的顺序自己拖（拖一行放到另一行上），把一行拖到 tab 栏另一个分类上就换了归属，右键菜单里也有同样这几件事
 - **沙漏视图** — 横跨所有分类的时间轴，按计划日铺开，今天锚在中间，上方是过去、下方是未来；顶上就能记事，旁边的分类选择器记着上次的选择，记下的待办自动排在今天；条目拖到另一个日期分组就改了期，落点当场框出来；每一行都能就地打勾（勾上就点亮成它的分类色）、悬停浮出删除；右边单开一列「未排期」，按分类分组、自己滚，悬停选个日子或者直接拖到轴上某一天就排上了，在那儿打了勾的会亮一下再淡出
-- **收藏流** — 粘贴链接或文字即收藏，链接卡片带域名标签、点击直达
+- **收藏流** — 粘贴链接或文字即收藏，链接卡片带域名标签、点击直达；带 iCloud 权限的构建里逐条同步到 iCloud（见「签名」），断网照用不误，恢复后自动补发
 - **AI 用量** — 侧边栏底部小卡片，每分钟自动刷新。今日 token 用量来自本机 Claude Code / Codex 的会话日志（四种 token 分开算，悬停看细分）；限流窗口 Claude 走 `/api/oauth/usage`（5 小时与 7 天两个窗口的真实百分比与重置时刻），Codex 走它自己 rollout 日志里的 `rate_limits`
 
 ## 构建 & 运行
@@ -32,13 +32,25 @@ ln -s "$PWD/build/案头.app" "/Applications/案头.app"
 
 ### 签名
 
-`build.sh` 默认用 ad-hoc 签名，而 ad-hoc 签名**每次重建都不一样** —— macOS 于是把每次构建当成另一个程序，钥匙串之类按程序记的授权每次都要重点一遍。跑一次下面这个就换成一张固定的本机证书，之后授权点一次就够（会问一次登录密码）：
+`build.sh` 按手头有什么分三档签名，从高到低逐档退，哪一档都出得来产物：
 
-```bash
-./Resources/make-signing-cert.sh
-```
+1. **开发者证书 + iCloud provisioning profile** —— app 拿到 iCloud 权限，收藏的同步就此启动。profile 这样讨来（每台机器一次；前提是 Xcode → Settings → Accounts 里登录过开发者账号）：
 
-这张证书只在本机有效，不能用于分发。
+   ```bash
+   ./Resources/provision.sh
+   ```
+
+   它借一个只为签名存在的最小 Xcode 工程走管理式签名（`-allowProvisioningUpdates`）：注册 App ID、开通 iCloud 容器、登记这台 Mac、签发并下载 profile，不需要去开发者网站手点。产物落在 `Resources/provisioning/Workdesk.provisionprofile`，不入库。
+
+2. **本机自签证书** —— 签名稳定，按程序记的授权（比如钥匙串）点一次就够，但没有 iCloud，同步安静地不启动。建证书跑一次（会问一次登录密码）：
+
+   ```bash
+   ./Resources/make-signing-cert.sh
+   ```
+
+   这张证书只在本机有效，不能用于分发。
+
+3. **ad-hoc** —— 什么都没有时的兜底。签名**每次重建都不一样**，macOS 会把每次构建当成另一个程序，按程序记的授权每次都要重点一遍。
 
 ### AI 用量的数据从哪来
 
@@ -71,6 +83,10 @@ swift test
 
 分类、待办与收藏各自保存在 `~/Library/Application Support/XiaoyuWorkdesk/`（`categories.json` / `todos-v2.json` / `favorites.json`），重启不丢。用户的选择偏好（比如沙漏视图记事时选的分类）单独落在 `preferences.json`，与数据分开。
 
+同步的两份记录也在同一目录：`sync-changes.json` 是账本（待发的保存与删除的墓碑），`sync-engine.json` 是 CKSyncEngine 的状态。本地 JSON 永远是界面唯一的事实来源 —— 这两份丢了也不丢数据，只是要与云端重新对一遍账。
+
+存储目录可以用环境变量 `WORKDESK_DATA_DIR` 指到别处 —— 同一台 Mac 跑两个实例（不同目录、同一个 iCloud 账号）验证同步靠的就是它。
+
 待办改为按分类组织后，旧的 `todos.json` 已废弃：不读取、不转换，装着旧数据的机器首次运行就是空状态。
 
 ## 项目结构
@@ -89,6 +105,9 @@ Sources/Workdesk/
   TodoInputField.swift    记事输入框，两个视图共用
   PlannedDayControl.swift 一条待办的排期入口与计划日面板
   FavoritesView.swift     收藏流
+  CloudSync.swift         iCloud 同步引擎（CKSyncEngine）与故障记号
+  SyncChangeLog.swift     同步的账本：待发队列与墓碑
+  SyncRecords.swift       CloudKit 记录的打包与解包
   UsageCard.swift         AI 用量卡片，每分钟自刷
   UsageScanner.swift      扫描本地日志统计 token，并取 Codex 的限流窗口
   UsageLimits.swift       用量与限流的数据模型，以及接口返回的解析
@@ -104,5 +123,7 @@ Tests/WorkdeskTests/
   HourglassRecordingTests.swift 沙漏视图记事：归属分类、计划日与记住的选择
   TimelineDragTests.swift    沙漏视图里拖着条目改期
   DayLabelTests.swift        日期在界面上的写法
+  SyncChangeLogTests.swift   同步账本：记账、销账与墓碑
+  FavoriteSyncTests.swift    收藏与同步的合缝：记账、云端改动落地、记录打包解包
   TestSupport.swift          临时目录等测试夹具
 ```

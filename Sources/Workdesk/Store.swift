@@ -14,6 +14,15 @@ final class Store {
     /// 上次选来记事的分类。可能指向一个已经不在了的分类 —— 对外的 `recordingCategory` 管这件事。
     private var chosenRecordingCategoryID: Category.ID?
 
+    /// 同步的账本：本地增删先记账，云端慢慢结清。眼下只有收藏记账（#34），
+    /// 待办与分类记进来是 #35 的事。没有同步引擎的构建里它照记不误 —— 账不会丢，
+    /// 哪天引擎接上了照账补发。
+    private(set) var syncLog = SyncChangeLog()
+
+    /// 账本添了新账时喊一声，同步引擎听着 —— `Store` 自己不认识 CloudKit，
+    /// 谁在听、听了做什么，都不是它的事。
+    @ObservationIgnored var syncLogDidChange: (() -> Void)?
+
     /// 正常运行时的存储位置。只算路径，不建目录 —— 建目录是 `init` 的事。
     nonisolated static var defaultDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -29,6 +38,7 @@ final class Store {
         categories = load(Self.categoriesFile) ?? []
         todos = load(Self.todosFile) ?? []
         favorites = load("favorites.json") ?? []
+        syncLog = load(Self.syncLogFile) ?? SyncChangeLog()
         chosenRecordingCategoryID = (load(Self.preferencesFile) as Preferences?)?.recordingCategoryID
         seedOrders()
     }
@@ -379,19 +389,81 @@ final class Store {
     func addFavorite(_ raw: String) {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
+        let item: FavoriteItem
         if t.lowercased().hasPrefix("http://") || t.lowercased().hasPrefix("https://"),
            let url = URL(string: t) {
             let title = url.host()?.replacingOccurrences(of: "www.", with: "") ?? t
-            favorites.append(FavoriteItem(title: title, urlString: t))
+            item = FavoriteItem(title: title, urlString: t)
         } else {
-            favorites.append(FavoriteItem(title: t))
+            item = FavoriteItem(title: t)
         }
+        favorites.append(item)
         saveFavorites()
+        logSyncChange { $0.recordSave(item.changeEntry) }
     }
 
     func deleteFavorite(_ item: FavoriteItem) {
         favorites.removeAll { $0.id == item.id }
         saveFavorites()
+        logSyncChange { $0.recordDelete(item.changeEntry) }
+    }
+
+    // MARK: - 同步
+
+    /// 云端来的一条收藏，静静落在该在的位置。躺在墓碑里的不复活 —— 本地删了、
+    /// 删除还没送达云端时，一次迟到的抓取可能把它又带回来，那不是它复活的理由。
+    /// 已有同名的就原样替换（收藏没有编辑，替换只是幂等）；没有的按收藏时刻插进流里 ——
+    /// 两台设备各收各的，最后看到的是同一条按时间铺开的流，不是按谁先联网铺开的。
+    func applyRemoteFavorite(_ item: FavoriteItem) {
+        guard !syncLog.isTombstoned(item.changeEntry) else { return }
+        if let i = favorites.firstIndex(where: { $0.id == item.id }) {
+            favorites[i] = item
+        } else {
+            let at = favorites.firstIndex { $0.createdAt > item.createdAt } ?? favorites.endIndex
+            favorites.insert(item, at: at)
+        }
+        saveFavorites()
+    }
+
+    /// 云端删掉的一条收藏，本机也删。本来就没有就什么也不发生 ——
+    /// 两台设备先后删同一条是常事，不是错。
+    func applyRemoteFavoriteDeletion(recordName: String) {
+        guard let id = UUID(uuidString: recordName) else { return }
+        favorites.removeAll { $0.id == id }
+        saveFavorites()
+    }
+
+    /// 引擎发记录时按名字取货。取不着就是本地已经删了 —— 引擎照着 `nil` 放弃那次保存。
+    func favorite(recordName: String) -> FavoriteItem? {
+        guard let id = UUID(uuidString: recordName) else { return nil }
+        return favorites.first { $0.id == id }
+    }
+
+    /// 保存送达云端，销账。
+    func settleSyncSave(recordName: String) {
+        syncLog.settleSave(recordName: recordName)
+        save(syncLog, to: Self.syncLogFile)
+    }
+
+    /// 删除送达云端（或云端确认根本没这条），墓碑撤掉。
+    func settleSyncDelete(recordName: String) {
+        syncLog.settleDelete(recordName: recordName)
+        save(syncLog, to: Self.syncLogFile)
+    }
+
+    /// 首次接上云端时把本地已有的收藏全数记账 —— 同步来之前收藏的那些从没进过账本，
+    /// 不补这一笔，它们就永远只待在这一台机器上。集合语义，多跑一次也只是同一笔账。
+    func enqueueAllFavoritesForSync() {
+        for item in favorites { syncLog.recordSave(item.changeEntry) }
+        save(syncLog, to: Self.syncLogFile)
+        syncLogDidChange?()
+    }
+
+    /// 记一笔账、落盘、喊一声。本地增删走这条路；云端来的改动不走 —— 那不是欠账。
+    private func logSyncChange(_ change: (inout SyncChangeLog) -> Void) {
+        change(&syncLog)
+        save(syncLog, to: Self.syncLogFile)
+        syncLogDidChange?()
     }
 
     // MARK: - Usage
@@ -485,6 +557,8 @@ final class Store {
     /// 待办的存放位置。刻意不叫 `todos.json` —— 那是待办还没有所属分类时的旧文件，
     /// 已经废弃：不读取、不转换，装着旧数据的机器首次运行就是空状态。
     private static let todosFile = "todos-v2.json"
+    /// 同步的账本。与数据同目录、分开存 —— 它说的是「欠云端什么」，不是数据本身。
+    private static let syncLogFile = "sync-changes.json"
 
     private func saveCategories() { save(categories, to: Self.categoriesFile) }
     private func saveTodos() { save(todos, to: Self.todosFile) }
