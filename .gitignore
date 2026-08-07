@@ -13,3 +13,8 @@ build/
 
 # 本地临时
 *.log
+
+# 每台机器自己的签名资产（Resources/provision.sh 讨来的，含设备与证书信息，不入库）
+Resources/provisioning/Workdesk.provisionprofile
+Resources/provisioning/Provisioning.xcodeproj/project.xcworkspace/
+Resources/provisioning/Provisioning.xcodeproj/xcuserdata/
