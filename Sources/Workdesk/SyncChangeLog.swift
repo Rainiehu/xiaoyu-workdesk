@@ -8,7 +8,7 @@ import Foundation
 /// 只是它的工作副本，真正的账以这里为准：引擎状态丢了，照这本账能重新排队。
 ///
 /// 记录用「类型 + 名字」两个字符串指认，不指认具体的模型类型 ——
-/// 待办与分类（#35）走的将是同一本账，这里不用改一个字。
+/// 待办、分类与收藏走的就是同一本账。
 struct SyncChangeLog: Codable, Equatable {
     /// 一条记录在账上的身份：CloudKit 的记录类型与记录名。
     struct Entry: Codable, Equatable, Hashable {

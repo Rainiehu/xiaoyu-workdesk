@@ -143,7 +143,7 @@ struct FavoriteSyncTests {
         }
     }
 
-    /// 同步来之前收藏的那些从没进过账本 —— 首次接上云端时全数补记。
+    /// 同步来之前的存量数据从没进过账本 —— 首次接上云端时全数补记，一条不丢。
     @Test("首次接上云端时把存量收藏全数记账")
     func backfillEnqueuesEverything() throws {
         try withTemporaryDirectory { dir in
@@ -153,7 +153,7 @@ struct FavoriteSyncTests {
             store.settleSyncSave(recordName: try #require(store.favorites.first).recordName)
             store.settleSyncSave(recordName: try #require(store.favorites.last).recordName)
 
-            store.enqueueAllFavoritesForSync()
+            store.enqueueAllForSync()
             #expect(Set(store.syncLog.pendingSaves) == Set(store.favorites.map(\.changeEntry)))
         }
     }

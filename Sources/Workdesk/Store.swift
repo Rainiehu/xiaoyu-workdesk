@@ -14,10 +14,14 @@ final class Store {
     /// 上次选来记事的分类。可能指向一个已经不在了的分类 —— 对外的 `recordingCategory` 管这件事。
     private var chosenRecordingCategoryID: Category.ID?
 
-    /// 同步的账本：本地增删先记账，云端慢慢结清。眼下只有收藏记账（#34），
-    /// 待办与分类记进来是 #35 的事。没有同步引擎的构建里它照记不误 —— 账不会丢，
-    /// 哪天引擎接上了照账补发。
+    /// 同步的账本：本地增删改先记账，云端慢慢结清。待办、分类与收藏都记在这一本上。
+    /// 没有同步引擎的构建里它照记不误 —— 账不会丢，哪天引擎接上了照账补发。
     private(set) var syncLog = SyncChangeLog()
+
+    /// 云端先送来了待办、它归属的分类却还没到 —— 那条待办先在这儿候着，
+    /// 分类一落地就跟着落。落了盘：分类可能等到下次启动才来，候着的不能跟着重启丢了。
+    /// 界面永远只看 `todos`，候着的这些一概不露面 —— 露面就成了无归属的待办。
+    private(set) var orphanTodos: [TodoItem] = []
 
     /// 账本添了新账时喊一声，同步引擎听着 —— `Store` 自己不认识 CloudKit，
     /// 谁在听、听了做什么，都不是它的事。
@@ -39,6 +43,7 @@ final class Store {
         todos = load(Self.todosFile) ?? []
         favorites = load("favorites.json") ?? []
         syncLog = load(Self.syncLogFile) ?? SyncChangeLog()
+        orphanTodos = load(Self.orphansFile) ?? []
         chosenRecordingCategoryID = (load(Self.preferencesFile) as Preferences?)?.recordingCategoryID
         seedOrders()
     }
@@ -81,6 +86,8 @@ final class Store {
         let category = Category(name: n, color: nextColor())
         categories.append(category)
         saveCategories()
+        // 落在末尾，谁的位置都没动 —— 只有它自己欠云端一笔。
+        logSyncChange { $0.recordSave(category.changeEntry) }
         return category
     }
 
@@ -120,6 +127,13 @@ final class Store {
               let to = categories.firstIndex(where: { $0.id == targetID }), from != to else { return }
         categories.insert(categories.remove(at: from), at: to)
         saveCategories()
+        // 位置在云端是每条记录自己的字段，这一挪让两头之间的分类都换了位置 ——
+        // 一批记录同时变脏，都得记。
+        logSyncChange { log in
+            for category in categories[min(from, to)...max(from, to)] {
+                log.recordSave(category.changeEntry)
+            }
+        }
     }
 
     /// 除了这一个之外的分类。待办的「移到分类」菜单列的就是它们 ——
@@ -136,19 +150,26 @@ final class Store {
     /// 删到一个不剩是允许的 —— 那时主线回到引导空态，与首次启动是同一个状态。
     @discardableResult
     func deleteCategory(_ id: Category.ID) -> CategoryDeletion {
-        guard categories.contains(where: { $0.id == id }) else { return .noSuchCategory }
+        guard let index = categories.firstIndex(where: { $0.id == id }) else { return .noSuchCategory }
         let mine = todos(in: id)
         guard mine.isEmpty else { return .refused(todoCount: mine.count) }
-        categories.removeAll { $0.id == id }
+        let entry = categories[index].changeEntry
+        categories.remove(at: index)
         saveCategories()
+        logSyncChange { log in
+            log.recordDelete(entry)
+            // 身后的分类都往前挪了一位 —— 位置在云端是记录的字段，挪了就是变了。
+            for category in categories[index...] { log.recordSave(category.changeEntry) }
+        }
         return .deleted
     }
 
-    /// 改一个分类并落盘。找不着就什么也不发生 —— 与 `update(_:_:)` 同一副脾气。
+    /// 改一个分类，落盘并记账。找不着就什么也不发生 —— 与 `update(_:_:)` 同一副脾气。
     private func updateCategory(_ id: Category.ID, _ change: (inout Category) -> Void) {
         guard let i = categories.firstIndex(where: { $0.id == id }) else { return }
         change(&categories[i])
         saveCategories()
+        logSyncChange { $0.recordSave(categories[i].changeEntry) }
     }
 
     // MARK: - 记事的分类
@@ -254,8 +275,10 @@ final class Store {
     func addTodo(_ text: String, in categoryID: Category.ID, plannedOn day: Date? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, categories.contains(where: { $0.id == categoryID }) else { return }
-        todos.append(TodoItem(text: t, categoryID: categoryID, plannedOn: day, order: topOrder(in: categoryID)))
+        let item = TodoItem(text: t, categoryID: categoryID, plannedOn: day, order: topOrder(in: categoryID))
+        todos.append(item)
         saveTodos()
+        logSyncChange { $0.recordSave(item.changeEntry) }
     }
 
     /// 落在这个分类最上面要多小的位置。刚记下的事就在眼前，不必先滚到底去找 ——
@@ -361,26 +384,33 @@ final class Store {
     }
 
     /// 把一个分类的位置从头编一遍：交进来的顺序就是从上到下的顺序。
-    /// 每次都全编而不是插空，于是位置永远是紧挨着的一串小整数，不会越拖越挤。
+    /// 每次都全编而不是插空，于是位置永远是紧挨着的一串小整数，不会越拖越挤 ——
+    /// 代价是这一编让整个分类的记录同时变脏，账上都得记（ADR-0002 的紧凑整数不动）。
     private func renumber(_ categoryID: Category.ID, as order: [TodoItem]) {
         let positions = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($0.element.id, $0.offset) })
         for i in todos.indices where todos[i].categoryID == categoryID {
             todos[i].order = positions[todos[i].id]
+        }
+        logSyncChange { log in
+            for todo in todos where todo.categoryID == categoryID { log.recordSave(todo.changeEntry) }
         }
     }
 
     func deleteTodo(_ item: TodoItem) {
         todos.removeAll { $0.id == item.id }
         saveTodos()
+        logSyncChange { $0.recordDelete(item.changeEntry) }
     }
 
-    /// 改一条待办并落盘。手里那份可能是视图层拿着的旧副本，所以一律按 id 现找现改 ——
+    /// 改一条待办，落盘并记账。手里那份可能是视图层拿着的旧副本，所以一律按 id 现找现改 ——
     /// 没找着（比如同时被删了）就什么也不发生，返回 `false`。
+    /// 打勾、改写、排期、改期、换分类都从这儿过，账因此一处也漏不掉。
     @discardableResult
     private func update(_ id: TodoItem.ID, _ change: (inout TodoItem) -> Void) -> Bool {
         guard let i = todos.firstIndex(where: { $0.id == id }) else { return false }
         change(&todos[i])
         saveTodos()
+        logSyncChange { $0.recordSave(todos[i].changeEntry) }
         return true
     }
 
@@ -439,6 +469,93 @@ final class Store {
         return favorites.first { $0.id == id }
     }
 
+    /// 同上，取的是待办。
+    func todo(recordName: String) -> TodoItem? {
+        guard let id = UUID(uuidString: recordName) else { return nil }
+        return todos.first { $0.id == id }
+    }
+
+    /// 同上，取的是分类。此刻排第几一并带出 —— 位置不落在模型上
+    /// （`categories` 数组的顺序就是顺序），云端的记录却少不了这个字段。
+    func category(recordName: String) -> (category: Category, position: Int)? {
+        guard let id = UUID(uuidString: recordName),
+              let i = categories.firstIndex(where: { $0.id == id }) else { return nil }
+        return (categories[i], i)
+    }
+
+    /// 云端来的一条待办，静静落在该在的位置。整条后写胜：本地有同一条就整条换掉 ——
+    /// 字段级合并是 #36 的事。躺在墓碑里的不复活，与收藏同一条规矩。
+    ///
+    /// 归属的分类还没到（云端的抓取不保证先送分类）就先去候着，一条也不丢；
+    /// 分类落地时再落它。归属分类在本地是硬约束，云端来的也不例外。
+    func applyRemoteTodo(_ item: TodoItem) {
+        guard !syncLog.isTombstoned(item.changeEntry) else { return }
+        guard categories.contains(where: { $0.id == item.categoryID }) else {
+            stashOrphan(item)
+            return
+        }
+        if let i = todos.firstIndex(where: { $0.id == item.id }) {
+            todos[i] = item
+        } else {
+            // 按创建时刻插进数组 —— 数组的先后就是轴上同一天里的先后，
+            // 两台设备各收各的，最后同一天里看到的次序也该是同一个。
+            let at = todos.firstIndex { $0.createdAt > item.createdAt } ?? todos.endIndex
+            todos.insert(item, at: at)
+        }
+        saveTodos()
+    }
+
+    /// 云端删掉的一条待办，本机也删；还在候着没落地的一并撤掉。
+    /// 本来就没有就什么也不发生 —— 两台设备先后删同一条是常事，不是错。
+    func applyRemoteTodoDeletion(recordName: String) {
+        guard let id = UUID(uuidString: recordName) else { return }
+        todos.removeAll { $0.id == id }
+        saveTodos()
+        if orphanTodos.contains(where: { $0.id == id }) {
+            orphanTodos.removeAll { $0.id == id }
+            saveOrphans()
+        }
+    }
+
+    /// 云端来的一个分类，落到它记录里写的那个位置上。整条后写胜：本地有同一个就
+    /// 整条换掉（名字、颜色、位置一起）。两台各自建过同名分类就是两个分类 ——
+    /// UUID 不同，并集里并存，不做自动合并。落定之后把候着的孤儿待办接回来。
+    ///
+    /// 一批里有好几个分类时，调用方按位置从小到大交进来（`CloudSync.landingOrder`
+    /// 摆正次序）—— 这儿逐条「插到第几位」，从小到大插完的一排才是记录说的那一排。
+    func applyRemoteCategory(_ category: Category, position: Int) {
+        guard !syncLog.isTombstoned(category.changeEntry) else { return }
+        categories.removeAll { $0.id == category.id }
+        categories.insert(category, at: min(max(position, 0), categories.endIndex))
+        saveCategories()
+        adoptOrphans(of: category.id)
+    }
+
+    /// 云端删掉的一个分类。非空分类删不掉，云端来的删除也一样 —— 里头还有待办就不动，
+    /// 「每条待办都有归属」这条约束先守住；删与记打架时让分类复活的完整裁决是 #36 的事。
+    func applyRemoteCategoryDeletion(recordName: String) {
+        guard let id = UUID(uuidString: recordName), todos(in: id).isEmpty else { return }
+        categories.removeAll { $0.id == id }
+        saveCategories()
+    }
+
+    /// 一条没处落的云端待办先在这儿候着。同一条来了新版本就换掉旧的 —— 候着的也讲后写胜。
+    private func stashOrphan(_ item: TodoItem) {
+        orphanTodos.removeAll { $0.id == item.id }
+        orphanTodos.append(item)
+        saveOrphans()
+    }
+
+    /// 分类落地了，把候着的它名下的待办接回来。走 `applyRemoteTodo` 的原路 ——
+    /// 墓碑、整条替换、按创建时刻插队，规矩一条不少。
+    private func adoptOrphans(of categoryID: Category.ID) {
+        let adoptable = orphanTodos.filter { $0.categoryID == categoryID }
+        guard !adoptable.isEmpty else { return }
+        orphanTodos.removeAll { $0.categoryID == categoryID }
+        saveOrphans()
+        for item in adoptable { applyRemoteTodo(item) }
+    }
+
     /// 保存送达云端，销账。
     func settleSyncSave(recordName: String) {
         syncLog.settleSave(recordName: recordName)
@@ -451,9 +568,11 @@ final class Store {
         save(syncLog, to: Self.syncLogFile)
     }
 
-    /// 首次接上云端时把本地已有的收藏全数记账 —— 同步来之前收藏的那些从没进过账本，
+    /// 首次接上云端时把本地已有的一切记账 —— 同步来之前的存量数据从没进过账本，
     /// 不补这一笔，它们就永远只待在这一台机器上。集合语义，多跑一次也只是同一笔账。
-    func enqueueAllFavoritesForSync() {
+    func enqueueAllForSync() {
+        for category in categories { syncLog.recordSave(category.changeEntry) }
+        for todo in todos { syncLog.recordSave(todo.changeEntry) }
         for item in favorites { syncLog.recordSave(item.changeEntry) }
         save(syncLog, to: Self.syncLogFile)
         syncLogDidChange?()
@@ -559,10 +678,14 @@ final class Store {
     private static let todosFile = "todos-v2.json"
     /// 同步的账本。与数据同目录、分开存 —— 它说的是「欠云端什么」，不是数据本身。
     private static let syncLogFile = "sync-changes.json"
+    /// 候着的孤儿待办：云端先到的待办，归属的分类还没到。同样与数据分开存 ——
+    /// 它们还不是这台机器的数据，只是在等落地的资格。
+    private static let orphansFile = "sync-orphans.json"
 
     private func saveCategories() { save(categories, to: Self.categoriesFile) }
     private func saveTodos() { save(todos, to: Self.todosFile) }
     private func saveFavorites() { save(favorites, to: "favorites.json") }
+    private func saveOrphans() { save(orphanTodos, to: Self.orphansFile) }
 
     private func savePreferences() {
         save(Preferences(recordingCategoryID: chosenRecordingCategoryID), to: Self.preferencesFile)
