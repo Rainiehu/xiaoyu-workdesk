@@ -18,6 +18,10 @@ final class Store {
     /// 没有同步引擎的构建里它照记不误 —— 账不会丢，哪天引擎接上了照账补发。
     private(set) var syncLog = SyncChangeLog()
 
+    /// 同步的记性：影子副本（字段级合并的「上一次」）与分类的殉葬品（复活的料）。
+    /// 与账本一样随数据落盘 —— 冲突可能隔着一次重启才撞上。
+    private(set) var syncShadows = SyncShadows()
+
     /// 云端先送来了待办、它归属的分类却还没到 —— 那条待办先在这儿候着，
     /// 分类一落地就跟着落。落了盘：分类可能等到下次启动才来，候着的不能跟着重启丢了。
     /// 界面永远只看 `todos`，候着的这些一概不露面 —— 露面就成了无归属的待办。
@@ -43,6 +47,7 @@ final class Store {
         todos = load(Self.todosFile) ?? []
         favorites = load("favorites.json") ?? []
         syncLog = load(Self.syncLogFile) ?? SyncChangeLog()
+        syncShadows = load(Self.shadowsFile) ?? SyncShadows()
         orphanTodos = load(Self.orphansFile) ?? []
         chosenRecordingCategoryID = (load(Self.preferencesFile) as Preferences?)?.recordingCategoryID
         seedOrders()
@@ -154,6 +159,10 @@ final class Store {
         let mine = todos(in: id)
         guard mine.isEmpty else { return .refused(todoCount: mine.count) }
         let entry = categories[index].changeEntry
+        // 下葬时留足殉葬品：另一台设备可能正往这个分类里记待办，那时待办胜，
+        // 分类得带着原名原色原位置复活 —— 墓碑上只有名字，回魂的料在这儿。
+        syncShadows.bury(PlacedCategory(category: categories[index], position: index))
+        saveShadows()
         categories.remove(at: index)
         saveCategories()
         logSyncChange { log in
@@ -455,12 +464,13 @@ final class Store {
         saveFavorites()
     }
 
-    /// 云端删掉的一条收藏，本机也删。本来就没有就什么也不发生 ——
-    /// 两台设备先后删同一条是常事，不是错。
+    /// 云端删掉的一条收藏，本机也删，欠着的保存一并勾销 —— 与待办同一条删除胜的规矩。
+    /// 本来就没有就什么也不发生 —— 两台设备先后删同一条是常事，不是错。
     func applyRemoteFavoriteDeletion(recordName: String) {
         guard let id = UUID(uuidString: recordName) else { return }
         favorites.removeAll { $0.id == id }
         saveFavorites()
+        settleSyncSave(recordName: recordName)
     }
 
     /// 引擎发记录时按名字取货。取不着就是本地已经删了 —— 引擎照着 `nil` 放弃那次保存。
@@ -483,19 +493,32 @@ final class Store {
         return (categories[i], i)
     }
 
-    /// 云端来的一条待办，静静落在该在的位置。整条后写胜：本地有同一条就整条换掉 ——
-    /// 字段级合并是 #36 的事。躺在墓碑里的不复活，与收藏同一条规矩。
+    /// 云端来的一条待办，静静落在该在的位置。本地没动过它就整条照收；本地还欠着
+    /// 它的一笔保存（两边同时在改）就三方合并：影子、本地、云端对比，本地改过的
+    /// 方面重放到云端版上 —— 一边改写、一边改期，两边都保住；同一个方面两边都改，
+    /// 后写的算。躺在墓碑里的不复活，与收藏同一条规矩。
     ///
-    /// 归属的分类还没到（云端的抓取不保证先送分类）就先去候着，一条也不丢；
-    /// 分类落地时再落它。归属分类在本地是硬约束，云端来的也不例外。
-    func applyRemoteTodo(_ item: TodoItem) {
+    /// 归属的分类还没到（云端的抓取不保证先送分类）就先去候着，一条也不丢。
+    /// 归属的分类是本地删掉的，那是「删分类」对上了「往里记待办」：待办胜，
+    /// 分类带着殉葬品复活。归属分类在本地是硬约束，云端来的也不例外。
+    /// - Parameter modifiedAt: 云端这份的 modificationDate，判「后写」的云端一半。
+    func applyRemoteTodo(_ item: TodoItem, modifiedAt: Date? = nil) {
         guard !syncLog.isTombstoned(item.changeEntry) else { return }
-        guard categories.contains(where: { $0.id == item.categoryID }) else {
-            stashOrphan(item)
-            return
+        if !categories.contains(where: { $0.id == item.categoryID }) {
+            guard reviveBuriedCategory(item.categoryID) else {
+                stashOrphan(item)
+                return
+            }
         }
         if let i = todos.firstIndex(where: { $0.id == item.id }) {
-            todos[i] = item
+            todos[i] = syncLog.pendingSaves.contains(item.changeEntry)
+                ? SyncMerge.todo(
+                    shadow: syncShadows.todo(named: item.recordName),
+                    local: todos[i],
+                    remote: item,
+                    localIsLater: localWroteLater(item.recordName, than: modifiedAt)
+                )
+                : item
         } else {
             // 按创建时刻插进数组 —— 数组的先后就是轴上同一天里的先后，
             // 两台设备各收各的，最后同一天里看到的次序也该是同一个。
@@ -503,40 +526,92 @@ final class Store {
             todos.insert(item, at: at)
         }
         saveTodos()
+        // 影子对齐到云端此刻的样子 —— 合并后本地多出的那些改动还挂在账上，
+        // 下一轮推上去；影子先说清「云端现在是什么」，下次冲突才对得出账。
+        syncShadows.align(todo: item)
+        saveShadows()
     }
 
-    /// 云端删掉的一条待办，本机也删；还在候着没落地的一并撤掉。
-    /// 本来就没有就什么也不发生 —— 两台设备先后删同一条是常事，不是错。
+    /// 云端删掉的一条待办，本机也删；还在候着没落地的一并撤掉。删除胜 ——
+    /// 本地哪怕还欠着一笔改动的保存也照删，欠的账一并勾销：不勾销，那笔保存
+    /// 会把它在云端重新立起来。本来就没有就什么也不发生 —— 先后删同一条是常事，不是错。
     func applyRemoteTodoDeletion(recordName: String) {
         guard let id = UUID(uuidString: recordName) else { return }
         todos.removeAll { $0.id == id }
         saveTodos()
+        settleSyncSave(recordName: recordName)
+        syncShadows.drop(recordName: recordName)
+        saveShadows()
         if orphanTodos.contains(where: { $0.id == id }) {
             orphanTodos.removeAll { $0.id == id }
             saveOrphans()
         }
     }
 
-    /// 云端来的一个分类，落到它记录里写的那个位置上。整条后写胜：本地有同一个就
-    /// 整条换掉（名字、颜色、位置一起）。两台各自建过同名分类就是两个分类 ——
-    /// UUID 不同，并集里并存，不做自动合并。落定之后把候着的孤儿待办接回来。
+    /// 云端来的一个分类，落到它记录里写的那个位置上。本地没动过它就整条照收；
+    /// 本地还欠着它的一笔保存就三方合并 —— 一边改名、一边换色，两边都保住。
+    /// 两台各自建过同名分类就是两个分类 —— UUID 不同，并集里并存，不做自动合并。
+    /// 落定之后把候着的孤儿待办接回来。
     ///
     /// 一批里有好几个分类时，调用方按位置从小到大交进来（`CloudSync.landingOrder`
     /// 摆正次序）—— 这儿逐条「插到第几位」，从小到大插完的一排才是记录说的那一排。
-    func applyRemoteCategory(_ category: Category, position: Int) {
+    /// - Parameter modifiedAt: 云端这份的 modificationDate，判「后写」的云端一半。
+    func applyRemoteCategory(_ category: Category, position: Int, modifiedAt: Date? = nil) {
         guard !syncLog.isTombstoned(category.changeEntry) else { return }
+        var landing = PlacedCategory(category: category, position: position)
+        if let i = categories.firstIndex(where: { $0.id == category.id }),
+           syncLog.pendingSaves.contains(category.changeEntry) {
+            landing = SyncMerge.category(
+                shadow: syncShadows.category(named: category.recordName),
+                local: PlacedCategory(category: categories[i], position: i),
+                remote: landing,
+                localIsLater: localWroteLater(category.recordName, than: modifiedAt)
+            )
+        }
         categories.removeAll { $0.id == category.id }
-        categories.insert(category, at: min(max(position, 0), categories.endIndex))
+        categories.insert(landing.category, at: min(max(landing.position, 0), categories.endIndex))
         saveCategories()
+        syncShadows.align(category: PlacedCategory(category: category, position: position))
+        saveShadows()
         adoptOrphans(of: category.id)
     }
 
-    /// 云端删掉的一个分类。非空分类删不掉，云端来的删除也一样 —— 里头还有待办就不动，
-    /// 「每条待办都有归属」这条约束先守住；删与记打架时让分类复活的完整裁决是 #36 的事。
+    /// 云端删掉的一个分类。里头还有待办就是「删分类」对上了「往里记待办」：待办胜，
+    /// 分类留下 —— 但它在云端已经被删了，本地是复活的一方，得把复活说出去：
+    /// 重新记账推回云端，否则两边就此各说各话。空的照删，并留下殉葬品 ——
+    /// 归属它的待办仍可能从别处晚一步到来。
     func applyRemoteCategoryDeletion(recordName: String) {
-        guard let id = UUID(uuidString: recordName), todos(in: id).isEmpty else { return }
-        categories.removeAll { $0.id == id }
+        guard let id = UUID(uuidString: recordName),
+              let index = categories.firstIndex(where: { $0.id == id }) else { return }
+        guard todos(in: id).isEmpty else {
+            logSyncChange { $0.recordSave(categories[index].changeEntry) }
+            return
+        }
+        syncShadows.bury(PlacedCategory(category: categories[index], position: index))
+        saveShadows()
+        categories.remove(at: index)
         saveCategories()
+        // 欠着的改名换色已无处可去 —— 云端删了它，本地也认了，那笔账就此勾销。
+        settleSyncSave(recordName: recordName)
+    }
+
+    /// 云端来的待办指认的分类已经在本地下了葬：待办胜，分类带着名字、颜色与位置复活。
+    /// 复活是本地的一次表态 —— 记一笔保存把它说给云端（云端那头它可能也已经被删了）；
+    /// 这一笔顺手撤掉还没送出去的墓碑：账本的老规矩，有保存要记就说明它又活了。
+    private func reviveBuriedCategory(_ id: Category.ID) -> Bool {
+        guard let buried = syncShadows.exhumeCategory(named: id.uuidString) else { return false }
+        saveShadows()
+        categories.insert(buried.category, at: min(max(buried.position, 0), categories.endIndex))
+        saveCategories()
+        logSyncChange { $0.recordSave(buried.category.changeEntry) }
+        return true
+    }
+
+    /// 本地这笔欠账是不是比云端那份写得晚。本地一半是账本上记的改动时刻，
+    /// 云端一半是记录的 modificationDate —— 两个都是「写下的那一刻」的近似，
+    /// 平手让云端胜：它至少是双方都看得见的那一份。
+    private func localWroteLater(_ recordName: String, than remote: Date?) -> Bool {
+        (syncLog.editedAt[recordName] ?? .distantPast) > (remote ?? .distantPast)
     }
 
     /// 一条没处落的云端待办先在这儿候着。同一条来了新版本就换掉旧的 —— 候着的也讲后写胜。
@@ -562,10 +637,33 @@ final class Store {
         save(syncLog, to: Self.syncLogFile)
     }
 
-    /// 删除送达云端（或云端确认根本没这条），墓碑撤掉。
+    /// 删除送达云端（或云端确认根本没这条），墓碑撤掉。影子跟着撤 ——
+    /// 它说的是一条两边都还有的记录。殉葬品不撤：复活的机会比墓碑活得久。
     func settleSyncDelete(recordName: String) {
         syncLog.settleDelete(recordName: recordName)
         save(syncLog, to: Self.syncLogFile)
+        syncShadows.drop(recordName: recordName)
+        saveShadows()
+    }
+
+    /// 保存送达云端的那一刻，本地与云端说的是同一句话 —— 影子对齐到送达的那份。
+    /// 送达的间隙里若又有新改动，那是账上的下一笔：影子记的是云端此刻的样子，正合适。
+    func alignShadow(todo: TodoItem) {
+        syncShadows.align(todo: todo)
+        saveShadows()
+    }
+
+    /// 同上，对齐的是分类（带它送达时的位置）。
+    func alignShadow(category: Category, position: Int) {
+        syncShadows.align(category: PlacedCategory(category: category, position: position))
+        saveShadows()
+    }
+
+    /// 云端整个换了脸（zone 被删、换了账号）：影子说的全是旧库的样子，作废。
+    /// 殉葬品照留 —— 本地删过什么与对面是哪个库无关。
+    func forgetSyncShadows() {
+        syncShadows.forgetAlignments()
+        saveShadows()
     }
 
     /// 首次接上云端时把本地已有的一切记账 —— 同步来之前的存量数据从没进过账本，
@@ -678,6 +776,9 @@ final class Store {
     private static let todosFile = "todos-v2.json"
     /// 同步的账本。与数据同目录、分开存 —— 它说的是「欠云端什么」，不是数据本身。
     private static let syncLogFile = "sync-changes.json"
+    /// 同步的记性：影子副本与殉葬品。同样不是数据本身 —— 丢了顶多让下一次冲突
+    /// 退回整条后写胜、让一次复活少了料，本机的待办一条不少。
+    private static let shadowsFile = "sync-shadows.json"
     /// 候着的孤儿待办：云端先到的待办，归属的分类还没到。同样与数据分开存 ——
     /// 它们还不是这台机器的数据，只是在等落地的资格。
     private static let orphansFile = "sync-orphans.json"
@@ -686,6 +787,7 @@ final class Store {
     private func saveTodos() { save(todos, to: Self.todosFile) }
     private func saveFavorites() { save(favorites, to: "favorites.json") }
     private func saveOrphans() { save(orphanTodos, to: Self.orphansFile) }
+    private func saveShadows() { save(syncShadows, to: Self.shadowsFile) }
 
     private func savePreferences() {
         save(Preferences(recordingCategoryID: chosenRecordingCategoryID), to: Self.preferencesFile)

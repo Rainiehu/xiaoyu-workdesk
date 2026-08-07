@@ -71,10 +71,41 @@ struct SyncChangeLogTests {
     @Test("账本编解码往返不丢账")
     func codableRoundTrip() throws {
         var log = SyncChangeLog()
-        log.recordSave(a)
+        log.recordSave(a, at: Date(timeIntervalSinceReferenceDate: 800_000_000))
         log.recordDelete(b)
         let data = try JSONEncoder().encode(log)
         let reloaded = try JSONDecoder().decode(SyncChangeLog.self, from: data)
         #expect(reloaded == log)
+    }
+
+    /// 改动时刻是「后写胜」的本地一半 —— 记账时盖上，再改就更新；账的属性随账走：
+    /// 结清、勾销都跟着撤。
+    @Test("改动时刻随账起落")
+    func editTimesFollowTheLedger() {
+        var log = SyncChangeLog()
+        let first = Date(timeIntervalSinceReferenceDate: 1_000)
+        let second = Date(timeIntervalSinceReferenceDate: 2_000)
+        log.recordSave(a, at: first)
+        #expect(log.editedAt["A"] == first)
+        log.recordSave(a, at: second)
+        #expect(log.editedAt["A"] == second)
+
+        log.settleSave(recordName: "A")
+        #expect(log.editedAt["A"] == nil)
+
+        log.recordSave(b, at: first)
+        log.recordDelete(b)
+        #expect(log.editedAt["B"] == nil)
+    }
+
+    /// #35 落盘的旧账本还没有改动时刻 —— 照样读得进，缺的时刻按远古算。
+    @Test("读得进没有改动时刻的旧账本")
+    func decodesLegacyLedgers() throws {
+        let legacy = Data(#"""
+        {"pendingSaves":[{"recordType":"Favorite","recordName":"A"}],"tombstones":[]}
+        """#.utf8)
+        let log = try JSONDecoder().decode(SyncChangeLog.self, from: legacy)
+        #expect(log.pendingSaves == [a])
+        #expect(log.editedAt.isEmpty)
     }
 }
