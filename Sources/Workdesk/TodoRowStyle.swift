@@ -9,6 +9,9 @@ import SwiftUI
 /// 差别只在「哪几格是空的」：分类视图不画 tag（在哪个分类里是不言自明的），未排期列的 tag
 /// 在组头上，轴上的位置本身就是计划日、于是没有排期入口。顺序与度量都定在这儿，三处照着来 ——
 /// 先前没有这么一处共同的定义，三行才各自漂移成了三副模样。
+///
+/// 行上能做的事也一样：打勾、删除、就地改写、移到分类，在哪一列都是同一套，见 ADR-0003。
+/// 改写那点状态与「移到分类」那个菜单因此也收在这儿 —— 三份抄写迟早会漂成三副脾气。
 
 /// 一行待办的度量。三处共用，改一处三处一起动。
 enum TodoRowLayout {
@@ -23,12 +26,17 @@ enum TodoRowLayout {
 /// 一条待办的完成状态：空心圈是还没做，实心勾圈是做完了，点一下就翻面。
 ///
 /// 已完成的圈填成这条待办所属分类的颜色 —— 打勾于是把这一行「点亮」成它的分类色。
-/// 未完成的一律是灰圈：那时颜色还没什么好说的，而一行上只该有一处彩色抢眼。
+/// 未完成的是灰圈：那时颜色还没什么好说的，而一行上只该有一处彩色抢眼。
+/// 唯一的例外是过期（未完成且计划日已过，见 ADR-0004）：描边换成琥珀 ——
+/// 过期是完成状态的一层，所以记号长在说完成状态的这个圈上，打勾那一下顺手把它抹掉。
 ///
 /// 画哪个状态由调用方给，不自己去问 `todo.done` —— 未排期列里打完勾的那条要先亮一下再走，
 /// 那一拍里圈画的是「已完成」，而待办本身还没变。
 struct TodoToggle: View {
     let done: Bool
+    /// 过期了。只换没打勾时描边的颜色，别的一概不动 —— 这是个安静的记号，不是警报。
+    /// 未排期列不传：那儿的待办没有计划日，谈不上过没过。
+    var overdue: Bool = false
     /// 打勾之后填的颜色，就是这条待办所属分类的颜色。
     let tint: Color
     let toggle: () -> Void
@@ -37,12 +45,26 @@ struct TodoToggle: View {
         Button(action: toggle) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 16))
-                .foregroundStyle(done ? AnyShapeStyle(tint) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(circleStyle)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help(done ? "取消完成" : "标记完成")
     }
+
+    private var circleStyle: AnyShapeStyle {
+        if done { return AnyShapeStyle(tint) }
+        return overdue ? AnyShapeStyle(Color.overdueAmber) : AnyShapeStyle(.tertiary)
+    }
+}
+
+extension Color {
+    /// 过期记号的琥珀。刻意不取分类色板里的 amber —— 那是某个分类的记号，这是一层状态，
+    /// 撞了色就分不清「这行属于琥珀色的分类」和「这行过期了」，所以压灰压暗一档，弱提醒不抢戏。
+    /// 浅色外观深一档、深色外观浅一档，与分类色板同一条纪律。
+    static let overdueAmber = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor(rgb: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? 0xD9A558 : 0xC2801F)
+    })
 }
 
 /// 悬停时浮出的删除。三处摆在同一个位置上：行尾那个常驻元素的左边 ——
@@ -78,7 +100,100 @@ struct TodoDragPreview: View {
     }
 }
 
+/// 一行待办正在改写时的那点状态：改不改、改成什么。
+///
+/// 两样东西绑在一起，是因为「开始改写」必须一步完成：草稿先装上原文，同一下才翻成改写中 ——
+/// 分两步走的话输入框会先空着闪一帧。
+struct TodoEditing {
+    private(set) var active = false
+    var draft = ""
+
+    /// 拿现在的正文当草稿，人于是接着改，而不是从空白重打一遍。
+    mutating func begin(_ todo: TodoItem) {
+        draft = todo.text
+        active = true
+    }
+
+    mutating func end() {
+        active = false
+    }
+}
+
+/// 一行待办的正文。平时是一行字，改写时就地变成输入框 —— 改写发生在原位，不弹窗、不跳转。
+///
+/// 三处共用。字号不在这儿定：宽列用 body、窄列用 callout，由所在那一列外面罩上去，
+/// `Text` 和 `TextField` 因此一起跟着变，两种模样的字不会差一号。
+struct TodoText: View {
+    @Environment(Store.self) private var store
+    let todo: TodoItem
+    @Binding var editing: TodoEditing
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        if editing.active {
+            TextField("", text: $editing.draft)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onSubmit(commit)
+                // Esc 放弃这次改写，原文一字不动。
+                .onExitCommand { editing.end() }
+                // 点到别处去了也算改完 —— 一次改写没有「没保存」这个下场。
+                .onChange(of: focused) { _, focused in if !focused { commit() } }
+                .onAppear { focused = true }
+        } else {
+            Text(todo.text)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路。
+    private func commit() {
+        guard editing.active else { return }
+        editing.end()
+        store.editTodo(todo, to: editing.draft)
+    }
+}
+
+/// 「移到分类」：列出别的分类，选一个这条待办就归到那儿去。
+/// 移走只改归属 —— 计划日、创建日、完成日与完成状态都不变，这条由 `Store` 保证。
+/// 它同时是腾空一个分类的那条路：非空分类删不掉，没有它就永远删不掉。
+struct TodoMoveMenu: View {
+    @Environment(Store.self) private var store
+    let todo: TodoItem
+
+    var body: some View {
+        let others = store.categories(besides: todo.categoryID)
+        if others.isEmpty {
+            // 只有这一个分类时无处可移。菜单项照样在，只是灰着 —— 免得右键之后空空如也。
+            Button("移到分类") {}
+                .disabled(true)
+        } else {
+            Menu("移到分类") {
+                ForEach(others) { category in
+                    Button(category.name) { store.moveTodo(todo, to: category.id) }
+                }
+            }
+        }
+    }
+}
+
 extension View {
+    /// 行上那两个编辑入口：单击整行进就地改写，右键是同样这两件事的菜单。
+    /// 三处一模一样 —— 一行待办能做什么，不看它在哪一列，见 ADR-0003。
+    ///
+    /// 单击接的是整行，不只是正文那几个字：行里的圈、日期、删除都是按钮，各自先接住自己的那一下，
+    /// 不会落到这儿来。所以要摆在 `contentShape` 之后、`draggable` 之前，与整行抓得动那件事排好先后。
+    func todoRowEditing(_ todo: TodoItem, editing: Binding<TodoEditing>) -> some View {
+        contextMenu {
+            Button("改写") { editing.wrappedValue.begin(todo) }
+            TodoMoveMenu(todo: todo)
+        }
+        .onTapGesture {
+            if !editing.wrappedValue.active { editing.wrappedValue.begin(todo) }
+        }
+    }
+
     /// 一行待办的内缩与悬停底色。三处都要那块底色 —— 行上摆着打勾和删除、整行还抓得动，
     /// 手落在哪一行必须当场看得见。
     func todoRowChrome(hovering: Bool) -> some View {

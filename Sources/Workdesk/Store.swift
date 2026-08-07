@@ -434,7 +434,12 @@ final class Store {
             var snapshot = UsageSnapshot()
             snapshot.claude = local.claude
             snapshot.codex = local.codex
-            snapshot.codexWindows = local.codexWindows
+            // 限流窗口说的是「还剩多少」，那是状态，不随日期翻篇 —— 周窗口昨天用掉的量今天
+            // 还占着。而它只能从今天动过的会话日志里读到，今天没开过 Codex 就一条也读不着，
+            // 于是卡片上两条进度条整个消失。读不着就接着显示上次那份，跟 Claude 一个待遇。
+            snapshot.codexWindows = local.codexWindows.isEmpty
+                ? (previous?.codexWindows ?? [])
+                : local.codexWindows
 
             if let claude, !claude.windows.isEmpty {
                 snapshot.claudeWindows = claude.windows

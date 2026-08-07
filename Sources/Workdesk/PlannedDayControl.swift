@@ -4,9 +4,10 @@ import SwiftUI
 /// 未排期的，静止时完全干净，只在悬停时浮出一个日历图标。两种模样点开的是同一个面板 ——
 /// 排期与改期不是两件事。
 ///
-/// 计划日在过去还是将来，写法一模一样：不置顶、不变色、不加徽标。
-/// 「过期」这个概念在这里不存在，见 ADR-0001。
+/// 计划日在过去还是将来，这个日期标签的写法一模一样：不变色、不加徽标 ——
+/// 过期的记号只有一处，在那一行的勾圈上（描成琥珀），不在这儿再说一遍。见 ADR-0004。
 struct PlannedDayControl: View {
+    @Environment(TodayClock.self) private var clock
     let todo: TodoItem
     /// 整行是不是正被悬停 —— 未排期的入口只在悬停时露面。
     let rowHovering: Bool
@@ -15,7 +16,7 @@ struct PlannedDayControl: View {
 
     var body: some View {
         if let planned = todo.plannedOn {
-            entry { Text(planned.dayLabel).font(.caption) }
+            entry { Text(planned.dayLabel(relativeTo: clock.today)).font(.caption) }
         } else if rowHovering || presented {
             // 面板开着时把图标留住：鼠标移去面板上就不算悬停这一行了，入口不能跟着消失。
             entry { Image(systemName: "calendar").font(.system(size: 12)) }
@@ -37,7 +38,7 @@ struct PlannedDayControl: View {
         .buttonStyle(.plain)
         .help(todo.plannedOn == nil ? "安排计划日" : "改计划日")
         .popover(isPresented: $presented, arrowEdge: .bottom) {
-            PlannedDayPanel(todo: todo) { presented = false }
+            PlannedDayPanel(todo: todo, today: clock.today) { presented = false }
         }
     }
 }
@@ -47,16 +48,19 @@ struct PlannedDayControl: View {
 private struct PlannedDayPanel: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
+    /// 「今天」交进来，不在这儿问时钟 —— 面板上那个「今天」与轴上锚着的那一天必须是同一天。
+    let today: Date
     let dismiss: () -> Void
 
     /// 日历上落脚的那天。未排期时先落在今天 —— 落脚不等于排期，
     /// 真要写进待办得等用户点一下。
     @State private var picked: Date
 
-    init(todo: TodoItem, dismiss: @escaping () -> Void) {
+    init(todo: TodoItem, today: Date, dismiss: @escaping () -> Void) {
         self.todo = todo
+        self.today = today
         self.dismiss = dismiss
-        _picked = State(initialValue: todo.plannedOn ?? Date.now.dayStart)
+        _picked = State(initialValue: todo.plannedOn ?? today.dayStart)
     }
 
     var body: some View {
@@ -115,8 +119,8 @@ private struct PlannedDayPanel: View {
 
     /// 从今天数起的第几天，落在那天零点。
     private func day(_ offset: Int) -> Date {
-        let today = Date.now.dayStart
-        return Calendar.current.date(byAdding: .day, value: offset, to: today) ?? today
+        let start = today.dayStart
+        return Calendar.current.date(byAdding: .day, value: offset, to: start) ?? start
     }
 
     private func schedule(_ day: Date) {

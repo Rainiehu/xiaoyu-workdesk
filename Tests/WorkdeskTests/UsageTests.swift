@@ -139,6 +139,74 @@ struct UsageTests {
         #expect(earlier < later)
     }
 
+    /// 一条 Codex `token_count` 事件，真实形状。`total_token_usage` 后面紧跟着
+    /// `last_token_usage`，字段名一模一样 —— 解析必须认准前一段。
+    static func codexEvent(at ts: String, input: Int, cached: Int, output: Int) -> String {
+        """
+        {"timestamp":"\(ts)","type":"event_msg","payload":{"type":"token_count","info":\
+        {"total_token_usage":{"input_tokens":\(input),"cached_input_tokens":\(cached),\
+        "cache_write_input_tokens":0,"output_tokens":\(output),"reasoning_output_tokens":7,\
+        "total_tokens":\(input + output)},\
+        "last_token_usage":{"input_tokens":999999,"cached_input_tokens":999999,\
+        "cache_write_input_tokens":0,"output_tokens":999999,"reasoning_output_tokens":9,\
+        "total_tokens":999999},"model_context_window":258400}}}
+        """
+    }
+
+    @Test("Codex 只算今天新花的，不把整个会话的累计当今天")
+    func codexCountsOnlyToday() {
+        // 一个前天建、今天又 resume 的会话：累计 5M，其中今天只花了 1M。
+        let text = [
+            Self.codexEvent(at: "2026-07-29T09:00:00.000Z", input: 4_000_000, cached: 3_800_000, output: 20_000),
+            Self.codexEvent(at: "2026-07-30T01:00:00.000Z", input: 4_980_000, cached: 4_750_000, output: 30_000),
+        ].joined(separator: "\n")
+
+        let usage = UsageScanner.codexUsage(in: text, since: "2026-07-30T00:00:00.000Z")
+
+        // 今天新花的：input 涨了 980k（其中缓存读 950k），output 涨了 10k。
+        #expect(usage.cacheRead == 950_000)
+        #expect(usage.input == 30_000)      // 980k 减去缓存那部分
+        #expect(usage.output == 10_000)
+        #expect(usage.total == 990_000)
+        #expect(usage.sessions == 1)
+        // 老口径会把整个会话的 5,010,000 全记到今天头上 —— 差了五倍。
+        #expect(usage.total != 5_010_000)
+    }
+
+    @Test("会话建在今天，那今天就该是它的全部")
+    func codexCountsWholeSessionWhenItStartedToday() {
+        let text = [
+            Self.codexEvent(at: "2026-07-30T01:00:00.000Z", input: 100_000, cached: 90_000, output: 500),
+            Self.codexEvent(at: "2026-07-30T02:00:00.000Z", input: 300_000, cached: 280_000, output: 1_500),
+        ].joined(separator: "\n")
+
+        let usage = UsageScanner.codexUsage(in: text, since: "2026-07-30T00:00:00.000Z")
+
+        #expect(usage.cacheRead == 280_000)
+        #expect(usage.input == 20_000)
+        #expect(usage.output == 1_500)
+    }
+
+    @Test("今天没动过的会话，一个 token 也不算")
+    func codexIgnoresIdleSession() {
+        let text = Self.codexEvent(at: "2026-07-29T09:00:00.000Z", input: 4_000_000, cached: 3_800_000, output: 20_000)
+
+        let usage = UsageScanner.codexUsage(in: text, since: "2026-07-30T00:00:00.000Z")
+
+        #expect(usage.isEmpty)
+        #expect(usage.sessions == 0)   // 会话数也不能加 —— 它今天没出场
+    }
+
+    @Test("同一条事件里的 last_token_usage 不能被当成累计值读走")
+    func codexReadsTotalNotLast() {
+        // 两段字段名一模一样，从行首找会摸到哪个全看运气 —— 摸错就是 999999。
+        let text = Self.codexEvent(at: "2026-07-30T01:00:00.000Z", input: 1_000, cached: 400, output: 50)
+
+        let usage = UsageScanner.codexUsage(in: text, since: "2026-07-30T00:00:00.000Z")
+
+        #expect(usage.total == 1_050)
+    }
+
     @Test("百分比写成整数，但小于 1% 时不写成 0")
     func formatsPercent() {
         #expect(19.0.percentString == "19%")

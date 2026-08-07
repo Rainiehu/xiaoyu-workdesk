@@ -475,7 +475,8 @@ extension CategoryColor {
 
 extension NSColor {
     /// 0xRRGGBB。色板里的色值就是照着这个写的 —— 十六进制读起来比三个小数直观。
-    fileprivate convenience init(rgb: UInt32) {
+    /// 过期记号的琥珀（`Color.overdueAmber`）也从这儿走，全部色值因此是同一种写法。
+    convenience init(rgb: UInt32) {
         self.init(
             srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,
             green: CGFloat((rgb >> 8) & 0xFF) / 255,

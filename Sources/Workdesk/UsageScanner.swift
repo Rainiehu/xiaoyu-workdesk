@@ -38,14 +38,6 @@ enum UsageScanner {
         return String(rest[..<end])
     }
 
-    /// 一个会话文件里最后一次事件的时间戳。用来判断这个会话是不是落在本地今天。
-    private static func lastTimestamp(in text: String) -> String? {
-        guard let r = text.range(of: "\"timestamp\":\"", options: .backwards) else { return nil }
-        let rest = text[r.upperBound...]
-        guard let end = rest.firstIndex(of: "\"") else { return nil }
-        return String(rest[..<end])
-    }
-
     // MARK: - Claude Code (~/.claude/projects/**/*.jsonl)
 
     private static func scanClaude() -> ToolUsage {
@@ -86,45 +78,97 @@ enum UsageScanner {
         var tool = ToolUsage()
         var windows: [UsageWindow] = []
 
-        let f = DateFormatter()
-        f.dateFormat = "yyyy/MM/dd"
-        f.timeZone = TimeZone(identifier: "UTC")
         let dayStart = todayStart()
-
-        // 目录是按 **UTC** 日期分的，而我们要的是**本地**今天 —— 在时区偏移不为零的地方，
-        // 本地的一天必然横跨两个 UTC 目录，所以昨天那个也得看。
-        let dirs = [Date.now, dayStart].map {
-            home.appendingPathComponent(".codex/sessions/\(f.string(from: $0))")
-        }
-        let files = Set(dirs).flatMap { dir in
-            ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
-                .filter { $0.pathExtension == "jsonl" }
-        }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-
         let cutoff = timestampString(dayStart)
-        for url in files {
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            // 昨天那个 UTC 目录里也有本地今天之前就结束的会话，把它们挡掉。
-            // 这里按会话整体算：跨过本地午夜的那个会话会被整个计入 —— 取的是会话累计值，
-            // 本来就没法拆到某一天，宁可多算这一个也好过把它整个丢掉。
-            guard let last = lastTimestamp(in: text), last >= cutoff else { continue }
-            // 每个 token_count 事件带会话累计值，取最后一条即整个会话的用量。
-            guard let range = text.range(of: "\"total_token_usage\":", options: .backwards) else { continue }
-            let tail = text[range.upperBound...].prefix(400)
-            tool.sessions += 1
-            // Codex 的 input_tokens 已经含了缓存读，cached_input_tokens 是其中的一部分，
-            // 所以拆出来单独记，再从 input 里减掉 —— 不减就会把缓存那部分算两遍。
-            let input = firstInt(after: "\"input_tokens\":", in: tail) ?? 0
-            let cached = firstInt(after: "\"cached_input_tokens\":", in: tail) ?? 0
-            tool.input += max(input - cached, 0)
-            tool.cacheRead += cached
-            tool.cacheWrite += firstInt(after: "\"cache_write_input_tokens\":", in: tail) ?? 0
-            tool.output += firstInt(after: "\"output_tokens\":", in: tail) ?? 0
+        let root = home.appendingPathComponent(".codex/sessions")
+        let fm = FileManager.default
+        guard let en = fm.enumerator(at: root, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]) else {
+            return (tool, windows)
+        }
 
+        // 路径里的日期是会话**建**在哪天，不是它**活动**在哪天 —— resume 会往老目录里接着写，
+        // 见过一个 7/20 建的会话一路活到 7/29。所以不挑目录，挑「今天动过的文件」：
+        // 改动时间早于今天零点的，里面不可能有今天的事件。
+        var files: [(url: URL, mtime: Date)] = []
+        for case let url as URL in en {
+            guard url.pathExtension == "jsonl" else { continue }
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            guard let mtime = values?.contentModificationDate, mtime >= dayStart else { continue }
+            if let size = values?.fileSize, size > 150_000_000 { continue }
+            files.append((url, mtime))
+        }
+        // 按改动先后排，好让最后读到的那份是最新的 —— 限流状态取最后一份。
+        files.sort { $0.mtime < $1.mtime }
+
+        for (url, _) in files {
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let usage = codexUsage(in: text, since: cutoff)
+            if !usage.isEmpty {
+                tool.sessions += usage.sessions
+                tool.input += usage.input
+                tool.output += usage.output
+                tool.cacheWrite += usage.cacheWrite
+                tool.cacheRead += usage.cacheRead
+            }
             // 限流状态：最后一条 rate_limits 就是此刻的状态，后来的覆盖先前的。
             if let latest = codexWindows(in: text) { windows = latest }
         }
         return (tool, windows)
+    }
+
+    /// 一个会话文件里，落在 `cutoff` 之后的那部分用量。
+    ///
+    /// `token_count` 事件带的 `total_token_usage` 是**会话开天辟地以来**的累计，早前取最后
+    /// 一条，得到的是整个会话 —— 而会话可以被 resume 很多天。于是同一个数字既漏又多：
+    /// 活动在今天但建在上周的会话，目录不对，整个漏掉；建在今天的长会话，则把前几天的量
+    /// 一并算进今天。
+    ///
+    /// 这里改成取差：切点前最后一份累计值当基线，用最终值减掉它，剩下的才是今天新花的。
+    /// 累计值是单调的，所以减法成立；一天都没动过的会话减出来是零，自然不计。
+    static func codexUsage(in text: String, since cutoff: String) -> ToolUsage {
+        var base: CodexTotals?      // 今天开始之前，这个会话已经花掉的
+        var latest: CodexTotals?    // 到眼下为止的累计
+        var active = false          // 今天到底动过没有
+
+        for line in text.split(separator: "\n") where line.contains("\"total_token_usage\"") {
+            guard let ts = timestamp(in: line), let totals = codexTotals(in: line) else { continue }
+            if ts < cutoff { base = totals } else { active = true }
+            latest = totals
+        }
+        guard active, let latest else { return ToolUsage() }
+
+        let start = base ?? CodexTotals()
+        var usage = ToolUsage()
+        usage.sessions = 1
+        // Codex 的 input_tokens 已经含了缓存读，cached_input_tokens 是其中的一部分，
+        // 所以拆出来单独记，再从 input 里减掉 —— 不减就会把缓存那部分算两遍。
+        let input = max(latest.input - start.input, 0)
+        let cached = max(latest.cached - start.cached, 0)
+        usage.input = max(input - cached, 0)
+        usage.cacheRead = cached
+        usage.cacheWrite = max(latest.cacheWrite - start.cacheWrite, 0)
+        usage.output = max(latest.output - start.output, 0)
+        return usage
+    }
+
+    /// 一条 `token_count` 事件里的会话累计值。
+    struct CodexTotals: Equatable {
+        var input = 0
+        var cached = 0
+        var cacheWrite = 0
+        var output = 0
+    }
+
+    /// 只认 `total_token_usage` 那一段 —— 同一行里紧跟着还有个 `last_token_usage`，
+    /// 字段名一模一样，从行首找会摸到哪个全看运气。
+    private static func codexTotals(in line: some StringProtocol) -> CodexTotals? {
+        guard let r = line.range(of: "\"total_token_usage\":") else { return nil }
+        let slice = line[r.upperBound...].prefix(300)
+        guard let input = firstInt(after: "\"input_tokens\":", in: slice) else { return nil }
+        return CodexTotals(input: input,
+                           cached: firstInt(after: "\"cached_input_tokens\":", in: slice) ?? 0,
+                           cacheWrite: firstInt(after: "\"cache_write_input_tokens\":", in: slice) ?? 0,
+                           output: firstInt(after: "\"output_tokens\":", in: slice) ?? 0)
     }
 
     /// 从 rollout 日志里取最后一次 `rate_limits`。primary / secondary 两个窗口都要 ——

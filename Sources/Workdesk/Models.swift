@@ -45,6 +45,21 @@ struct TodoItem: Identifiable, Codable, Equatable {
     /// 可空只是为了读得进还没有这个字段的旧数据：`Store` 载入时会照老规矩给缺的补上，
     /// 补完之后每条都有。别把「没有位置」当成一种状态来用。
     var order: Int?
+
+    /// 过期：未完成，且计划日在「今天」之前。见 ADR-0004（修订了 ADR-0001 的「不设过期」）。
+    ///
+    /// 是个安静的事实，不是催办信号 —— 界面上只有勾圈描成琥珀这一处弱记号。
+    /// 当天不算（今天还没过完）；已完成的不算，哪怕完成得再晚（打勾那一下顺手把记号抹掉）；
+    /// 未排期的没有计划日，谈不上过没过。派生判断，不落盘。
+    ///
+    /// - Parameter today: 「今天」是哪天。取出来当参数，与 `dayLabel(relativeTo:)` 同一条理由：
+    ///   可测，且整条主线共用 `TodayClock` 的那一个值。
+    func isOverdue(today: Date) -> Bool {
+        guard !done, let plannedOn else { return false }
+        // 比的是「哪一天」不是「哪一刻」：两头都先落到 `dayStart` 再比 ——
+        // 计划日带着零点、今天可能带着时刻，直接比时刻会把当天误判成过期。
+        return plannedOn.dayStart < today.dayStart
+    }
 }
 
 /// 一次删除分类请求的下场。删不掉有两种，说清楚是哪一种 ——
