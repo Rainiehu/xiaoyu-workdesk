@@ -212,8 +212,8 @@ struct TodoCategoryLedgerTests {
     }
 }
 
-/// 云端改动的落地：整条记录后写胜兜底（字段级合并是 #36 的事），
-/// 待办必须归属存在的分类 —— 分类还没到的先候着，一条不丢。
+/// 云端改动的落地：本地没动过的整条照收，待办必须归属存在的分类 ——
+/// 分类还没到的先候着，一条不丢。两边同时改同一条的合并另有一套测试（ConflictRuleTests）。
 @MainActor
 @Suite("RemoteTodoCategoryLanding")
 struct RemoteTodoCategoryLandingTests {
@@ -255,12 +255,14 @@ struct RemoteTodoCategoryLandingTests {
         }
     }
 
-    @Test("云端同一个分类来了新版本就整条换掉：名字、颜色、位置一起")
+    @Test("本地没动过的分类，云端来了新版本就整条换掉：名字、颜色、位置一起")
     func remoteCategoryReplacesWholesale() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let category = try #require(store.addCategory("原名"))
             _ = try #require(store.addCategory("陪衬"))
+            // 账清了 —— 本地没有欠着的改动，云端的版本就是唯一说了算的版本。
+            settleAll(store)
 
             var renamed = category
             renamed.name = "云端改的名"
@@ -345,13 +347,15 @@ struct RemoteTodoCategoryLandingTests {
         }
     }
 
-    @Test("云端同一条待办来了新版本就整条换掉")
+    @Test("本地没动过的待办，云端来了新版本就整条换掉")
     func remoteTodoReplacesWholesale() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let category = try #require(store.addCategory("工作"))
             store.addTodo("原来的说法", in: category.id)
             let mine = try #require(store.todos.first)
+            // 账清了 —— 本地没有欠着的改动，云端的版本就是唯一说了算的版本。
+            settleAll(store)
 
             var theirs = mine
             theirs.text = "云端改的说法"
@@ -438,6 +442,8 @@ struct RemoteTodoCategoryLandingTests {
             let here = try #require(store.addCategory("本地有的"))
             store.addTodo("被挪走的", in: here.id)
             let mine = try #require(store.todos.first)
+            // 账清了 —— 这条测试说的是时序（分类晚到），不是冲突（本地并没有在改它）。
+            settleAll(store)
 
             let elsewhere = Workdesk.Category(name: "还在路上", color: .blue)
             var theirs = mine

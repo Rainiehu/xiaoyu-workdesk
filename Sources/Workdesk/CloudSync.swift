@@ -112,8 +112,16 @@ final class CloudSync: CKSyncEngineDelegate {
     }
 
     /// 把账本上所有欠账交给引擎。重复交不要紧 —— 引擎的待发队列是集合语义。
+    /// 账本是真账，引擎队列只是工作副本：墓碑已经撤了（分类复活走的那条路）的删除，
+    /// 队列里若还残留一笔就一并撤下 —— 复活的分类不该再被追杀。
     private func enqueuePending() {
         guard let engine else { return }
+        let tombstoned = Set(store.syncLog.tombstones.map(\.recordName))
+        let stale = engine.state.pendingRecordZoneChanges.filter {
+            if case .deleteRecord(let recordID) = $0 { return !tombstoned.contains(recordID.recordName) }
+            return false
+        }
+        if !stale.isEmpty { engine.state.remove(pendingRecordZoneChanges: stale) }
         let changes: [CKSyncEngine.PendingRecordZoneChange] =
             store.syncLog.pendingSaves.map { .saveRecord(Self.recordID($0.recordName)) }
             + store.syncLog.tombstones.map { .deleteRecord(Self.recordID($0.recordName)) }
@@ -190,12 +198,20 @@ final class CloudSync: CKSyncEngineDelegate {
 
         case .fetchedRecordZoneChanges(let changes):
             for record in Self.landingOrder(changes.modifications.map(\.record)) {
+                // modificationDate 一并交下去 —— 本地正欠着同一条的保存时要合并，
+                // 同一个方面两边都改过的，就拿它对本地的改动时刻判「后写」。
                 switch record.recordType {
                 case SyncSchema.todoType:
-                    if let item = TodoItem(record: record) { store.applyRemoteTodo(item) }
+                    if let item = TodoItem(record: record) {
+                        store.applyRemoteTodo(item, modifiedAt: record.modificationDate)
+                    }
                 case SyncSchema.categoryType:
                     if let category = Workdesk.Category(record: record) {
-                        store.applyRemoteCategory(category, position: Workdesk.Category.position(in: record))
+                        store.applyRemoteCategory(
+                            category,
+                            position: Workdesk.Category.position(in: record),
+                            modifiedAt: record.modificationDate
+                        )
                     }
                 case SyncSchema.favoriteType:
                     if let item = FavoriteItem(record: record) { store.applyRemoteFavorite(item) }
@@ -224,10 +240,12 @@ final class CloudSync: CKSyncEngineDelegate {
             // zone 在云端被整个删了（比如从 iCloud 设置里清掉了 app 数据）：
             // 本地是事实来源，就把 zone 重新立起来、东西照账补回去。
             // 记着的系统字段全部作废 —— 那些记录在云端已经不存在，得当新记录重新打。
+            // 影子同理作废：它说的是一个已经不存在的库的样子。
             for deletion in changes.deletions where deletion.zoneID == SyncSchema.zoneID {
                 syncEngine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: SyncSchema.zoneID))])
                 systemFields = [:]
                 persistSavedState()
+                store.forgetSyncShadows()
                 store.enqueueAllForSync()
             }
 
@@ -236,6 +254,18 @@ final class CloudSync: CKSyncEngineDelegate {
                 store.settleSyncSave(recordName: record.recordID.recordName)
                 // 保存成功交回来的记录带着新的系统字段 —— 记下，下次改它时打在这上面。
                 rememberSystemFields(of: record)
+                // 这一刻两边说的是同一句话 —— 影子对齐到送达的这份，冲突时的三方对比
+                // 从这儿起算。收藏没有编辑也就没有合并，不留影子。
+                switch record.recordType {
+                case SyncSchema.todoType:
+                    if let item = TodoItem(record: record) { store.alignShadow(todo: item) }
+                case SyncSchema.categoryType:
+                    if let category = Workdesk.Category(record: record) {
+                        store.alignShadow(category: category, position: Workdesk.Category.position(in: record))
+                    }
+                default:
+                    break
+                }
             }
             for recordID in sent.deletedRecordIDs {
                 store.settleSyncDelete(recordName: recordID.recordName)
@@ -299,17 +329,31 @@ final class CloudSync: CKSyncEngineDelegate {
         let name = failure.record.recordID.recordName
         switch failure.error.code {
         case .serverRecordChanged:
-            // 撞上了云端更新的版本。这张票的冲突规矩是整条记录后写胜（字段级合并是 #36 的事）：
-            // 本地这份是刚写下的、更晚 —— 记下服务端的系统字段，账挂着不销，
-            // 下一轮打在它上面重发，本地版整条盖过去。
-            // 收藏例外：它没有编辑，两份说的必然是同一件事 —— 接受云端那份，销账。
+            // 撞上了云端更新的版本：把服务端那份交回 `Store` 做字段级合并 ——
+            // 影子、本地、服务端三方对比，本地改过的方面重放到服务端版上。
+            // 账挂着不销：合并结果落回本地，下一轮打在服务端的底子上重发。
+            // 收藏没有编辑，两份说的必然是同一件事 —— 接受云端那份，销账。
             guard let server = failure.error.serverRecord else { break }
-            if server.recordType == SyncSchema.favoriteType {
+            rememberSystemFields(of: server)
+            persistSavedState()
+            switch server.recordType {
+            case SyncSchema.todoType:
+                if let item = TodoItem(record: server) {
+                    store.applyRemoteTodo(item, modifiedAt: server.modificationDate)
+                }
+            case SyncSchema.categoryType:
+                if let category = Workdesk.Category(record: server) {
+                    store.applyRemoteCategory(
+                        category,
+                        position: Workdesk.Category.position(in: server),
+                        modifiedAt: server.modificationDate
+                    )
+                }
+            case SyncSchema.favoriteType:
                 if let item = FavoriteItem(record: server) { store.applyRemoteFavorite(item) }
                 store.settleSyncSave(recordName: name)
-            } else {
-                rememberSystemFields(of: server)
-                persistSavedState()
+            default:
+                break
             }
         case .unknownItem:
             // 云端连它的墓都立好了 —— 那边的删除还在路上，这次保存不必坚持。
@@ -318,9 +362,11 @@ final class CloudSync: CKSyncEngineDelegate {
         case .zoneNotFound:
             // zone 还没立起来（或被删了）。先立 zone，账还挂着，下一轮再发 ——
             // 记着的系统字段全部作废：连 zone 都没了，那些记录只能当新的重新打。
+            // 影子同理 —— 它说的库已经不在了。
             engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: SyncSchema.zoneID))])
             systemFields = [:]
             persistSavedState()
+            store.forgetSyncShadows()
         case .quotaExceeded:
             return true
         default:
@@ -341,11 +387,13 @@ final class CloudSync: CKSyncEngineDelegate {
             accountAvailable = false
         case .switchAccounts:
             // 换了个人。本地照样是事实来源：引擎状态推倒重来，本地的一切全数记账，
-            // 推给新账号的库，云端有的照常合并进来。系统字段说的是上一个账号的库，作废。
+            // 推给新账号的库，云端有的照常合并进来。系统字段与影子说的都是
+            // 上一个账号的库，作废。
             accountAvailable = true
             engineState = nil
             systemFields = [:]
             persistSavedState()
+            store.forgetSyncShadows()
             startEngine()
         @unknown default:
             break

@@ -24,16 +24,24 @@ struct SyncChangeLog: Codable, Equatable {
     /// 不该被网络时序顶回来。删除送达云端后墓碑才撤。
     private(set) var tombstones: [Entry] = []
 
+    /// 每笔欠着的保存最后一次改动落在本地的时刻。冲突里判「后写胜」的本地一半 ——
+    /// 与云端记录的 modificationDate 对表。账的属性随账走：结清即撤 ——
+    /// 合并只发生在还有欠账的记录上。
+    private(set) var editedAt: [String: Date] = [:]
+
     /// 记一笔「欠一次保存」。之前若有同名墓碑就撤掉 —— 有保存要记，说明它在本地又活了。
-    mutating func recordSave(_ entry: Entry) {
+    /// - Parameter time: 这次改动落在本地的时刻。取出来当参数只为可测，平时就是此刻。
+    mutating func recordSave(_ entry: Entry, at time: Date = .now) {
         tombstones.removeAll { $0 == entry }
         if !pendingSaves.contains(entry) { pendingSaves.append(entry) }
+        editedAt[entry.recordName] = time
     }
 
     /// 记一笔「欠一次删除」，立起墓碑。还欠着的保存一并勾销 ——
     /// 本地都删了，那次保存已经没有要说的事。
     mutating func recordDelete(_ entry: Entry) {
         pendingSaves.removeAll { $0 == entry }
+        editedAt[entry.recordName] = nil
         if !tombstones.contains(entry) { tombstones.append(entry) }
     }
 
@@ -45,6 +53,7 @@ struct SyncChangeLog: Codable, Equatable {
     /// 而引擎交回来的凭据里有的只有名字。
     mutating func settleSave(recordName: String) {
         pendingSaves.removeAll { $0.recordName == recordName }
+        editedAt[recordName] = nil
     }
 
     /// 删除送达（或云端确认根本没这条），墓碑撤掉。
@@ -53,4 +62,19 @@ struct SyncChangeLog: Codable, Equatable {
     }
 
     var isEmpty: Bool { pendingSaves.isEmpty && tombstones.isEmpty }
+
+    init() {}
+
+    /// 手写解码只为读得进 #35 落盘的旧账本 —— 那时还没有 `editedAt`。
+    /// 旧账缺时刻不碍事：真撞上冲突，顶多把那一笔当远古的改动，按后写胜让给云端。
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pendingSaves = try container.decodeIfPresent([Entry].self, forKey: .pendingSaves) ?? []
+        tombstones = try container.decodeIfPresent([Entry].self, forKey: .tombstones) ?? []
+        editedAt = try container.decodeIfPresent([String: Date].self, forKey: .editedAt) ?? [:]
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pendingSaves, tombstones, editedAt
+    }
 }
