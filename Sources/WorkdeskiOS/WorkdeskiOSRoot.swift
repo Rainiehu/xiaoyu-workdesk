@@ -20,42 +20,13 @@ public struct WorkdeskiOSRoot: View {
     }
 
     public var body: some View {
-        ShellView()
+        MainlineScreen()
             .environment(store)
             .environment(clock)
             .environment(sync)
             // 同步在这儿点火；「今天」从这儿开始一直守着 —— 与 Mac 同一副规矩。
             .task { sync.start() }
             .task { await clock.watch() }
-    }
-}
-
-/// 阶段 2 的空壳：证明数据与同步通了。阶段 3 用主线界面换掉它。
-private struct ShellView: View {
-    @Environment(Store.self) private var store
-    @Environment(TodayClock.self) private var clock
-    @Environment(CloudSync.self) private var sync
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "hourglass")
-                .font(.system(size: 36))
-                .foregroundStyle(.teal)
-            Text(clock.today.dayLabel(relativeTo: clock.today))
-                .font(.title3.weight(.semibold))
-            Text("\(store.categories.count) 个分类 · \(store.todos.count) 条待办")
-                .foregroundStyle(.secondary)
-            if sync.active {
-                let status = SyncStatus(
-                    trouble: sync.trouble,
-                    sending: !store.syncLog.isEmpty,
-                    lastSuccessAt: sync.lastSuccessAt
-                )
-                Label(status.hoverLabel(now: .now), systemImage: status.symbolName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
     }
 }
 #endif

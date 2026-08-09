@@ -1,0 +1,188 @@
+#if os(iOS)
+import SwiftUI
+import WorkdeskCore
+
+/// 沙漏屏：横跨所有分类的一条连续时间轴，按计划日铺开，今天锚在中间、上方是过去、
+/// 下方是未来，打开时就滚到今天。分组由 `Store.timeline(today:)` 给出，这里不自己聚合。
+///
+/// 屏底是记事输入栏（写字的地方挨着手）：在这儿记下的待办自动排在今天，
+/// 立刻出现在眼前这条轴上。「今天居中不看今天是不是尽头」的垫高逻辑与 Mac 同一套。
+struct HourglassScreen: View {
+    @Environment(Store.self) private var store
+    @Environment(TodayClock.self) private var clock
+
+    @State private var draft = ""
+    @FocusState private var inputFocused: Bool
+
+    /// 今天那一组在轴内容里的纵向中点，和轴内容的总高 —— 「按需垫高」的量具，与 Mac 同一套。
+    @State private var todayCenterY: CGFloat?
+    @State private var contentHeight: CGFloat?
+
+    /// 中线上锚着哪一天。打开时指今天；用户一滚，绑定就改指中线上的那一天。
+    @State private var anchorDay: Date?
+
+    private static let contentSpace = "hourglassTimeline"
+
+    var body: some View {
+        let today = clock.today
+
+        return timeline(today: today)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let category = store.recordingCategory {
+                    input(category: category, today: today)
+                }
+            }
+    }
+
+    private func timeline(today: Date) -> some View {
+        GeometryReader { geo in
+            let insets = endInsets(half: geo.size.height / 2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(store.timeline(today: today)) { day in
+                        DayGroup(day: day, today: today)
+                            .id(day.day)
+                            .onGeometryChange(for: CGFloat.self) {
+                                $0.frame(in: .named(Self.contentSpace)).midY
+                            } action: { midY in
+                                // 亚点级的抖动不写回状态 —— 写了就会「测量 → 垫高 → 再测量」
+                                // 空转下去，iOS 上这个循环不像 Mac 那样自己停。
+                                if day.day.isSameDay(as: today), significantChange(todayCenterY, midY) {
+                                    todayCenterY = midY
+                                }
+                            }
+                    }
+                }
+                .scrollTargetLayout()
+                .coordinateSpace(name: Self.contentSpace)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if significantChange(contentHeight, height) { contentHeight = height }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, insets.top)
+                .padding(.bottom, insets.bottom)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollPosition(id: $anchorDay, anchor: .center)
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .onAppear {
+                anchorDay = today.dayStart
+            }
+            // 过了一天就重新锚回今天，跟刚打开一样 —— 手机上 app 常驻后台好几天是常态。
+            .onChange(of: today) { _, now in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    anchorDay = now.dayStart
+                }
+            }
+        }
+    }
+
+    /// 半个点以上才算真变了。测量值喂回布局的循环里，浮点的微抖必须在这儿拦住。
+    private func significantChange(_ old: CGFloat?, _ new: CGFloat) -> Bool {
+        guard let old else { return true }
+        return abs(old - new) > 0.5
+    }
+
+    /// 轴两头按需垫的空白，与 Mac 的 `endInsets` 同一套：今天哪一侧的内容不够半屏，
+    /// 就在那头垫上差的那一截，够了的一侧一点不垫。
+    private func endInsets(half: CGFloat) -> (top: CGFloat, bottom: CGFloat) {
+        guard let center = todayCenterY, let height = contentHeight else {
+            return (half, half)
+        }
+        return (max(0, half - center), max(0, half - (height - center)))
+    }
+
+    private func input(category: Category, today: Date) -> some View {
+        InputBar(
+            tint: .teal,
+            prompt: "记一件事，记在今天…",
+            text: $draft,
+            focused: $inputFocused,
+            submit: { record(today: today) }
+        ) {
+            RecordingCategoryPicker(current: category)
+        }
+    }
+
+    /// 记下草稿里的那件事。归到哪个分类、排在哪一天都由 `Store` 定；
+    /// 这里只管清空并留住焦点，好让记事可以一条接一条。
+    private func record(today: Date) {
+        store.recordOnTimeline(draft, today: today)
+        draft = ""
+        inputFocused = true
+    }
+}
+
+/// 轴上的一天：一个日期头，下面是这天的待办。今天这一组用强调样式，它是锚点；
+/// 别的日子一律同一副模样 —— 与 Mac 同一套。
+private struct DayGroup: View {
+    let day: TimelineDay
+    let today: Date
+
+    private var isToday: Bool { day.day.isSameDay(as: today) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            header
+            ForEach(day.todos) { todo in
+                TimelineRow(todo: todo, today: today)
+            }
+            if isToday && day.todos.isEmpty {
+                Text("今天还没有安排")
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isToday ? AnyShapeStyle(.teal.opacity(0.08)) : AnyShapeStyle(.clear))
+        )
+    }
+
+    /// 日期头。今天的写得大些、重些、是青的 —— 强调它靠字本身。
+    private var header: some View {
+        Text(day.day.dayLabel(relativeTo: today))
+            .font(.system(size: isToday ? 17 : 14, weight: isToday ? .semibold : .medium, design: .rounded))
+            .foregroundStyle(isToday ? AnyShapeStyle(.teal) : AnyShapeStyle(.secondary))
+            .padding(.horizontal, 10)
+            .padding(.bottom, 2)
+    }
+}
+
+/// 轴上的一行待办：打勾的圈、正文、所属分类的 tag（光板，不着色）。
+/// 勾圈填整体主调的青色 —— 一屏几十行，每行一个彩色勾圈就成了噪点，
+/// 而这一屏该抢眼的是「今天」。与 Mac 同一条理由。
+private struct TimelineRow: View {
+    @Environment(Store.self) private var store
+    let todo: TodoItem
+    let today: Date
+
+    private var category: Category? { store.category(todo.categoryID) }
+    private let tint: Color = .teal
+
+    var body: some View {
+        HStack(spacing: TodoRowLayout.spacing) {
+            TodoToggle(done: todo.done, overdue: todo.isOverdue(today: today), tint: tint) {
+                store.toggleTodo(todo)
+            }
+
+            Text(todo.text)
+                .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 8)
+
+            if let category {
+                CategoryTag(category: category, chip: false)
+            }
+        }
+        .todoRowChrome()
+        .contentShape(Rectangle())
+    }
+}
+#endif

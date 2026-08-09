@@ -424,33 +424,13 @@ struct NewCategoryButton<Label: View>: View {
 
 extension CategoryColor {
     /// 色名到色值。落盘的只有色名，于是这套配色可以随时整体调整。
-    /// 每种颜色两副色值：浅色外观下用深的那副，深色外观下用浅的那副 ——
-    /// tab 上的字是这个颜色本身，两种外观下都得压得住背景读得清。
+    /// 数值定在核心的 `rgbValues` 一处（两端共用），这儿只做 macOS 的动态颜色：
+    /// 浅色外观下用深的那副，深色外观下用浅的那副。
     var tint: Color {
-        let (light, dark) = values
+        let (light, dark) = rgbValues
         return Color(nsColor: NSColor(name: nil) { appearance in
             NSColor(rgb: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light)
         })
-    }
-
-    /// (浅色外观, 深色外观)。同一档明度上绕色相环取的一圈，于是整块色板浓淡一致。
-    private var values: (light: UInt32, dark: UInt32) {
-        switch self {
-        case .red: (0xDC2626, 0xF87171)
-        case .orange: (0xEA580C, 0xFB923C)
-        case .amber: (0xD97706, 0xFBBF24)
-        case .lime: (0x65A30D, 0xA3E635)
-        case .green: (0x16A34A, 0x4ADE80)
-        case .mint: (0x059669, 0x34D399)
-        case .teal: (0x0E96A8, 0x3FCEDC)
-        case .cyan: (0x0284C7, 0x38BDF8)
-        case .blue: (0x2563EB, 0x60A5FA)
-        case .indigo: (0x4F46E5, 0x818CF8)
-        case .purple: (0x9333EA, 0xC084FC)
-        case .fuchsia: (0xC026D3, 0xE879F9)
-        case .pink: (0xDB2777, 0xF472B6)
-        case .slate: (0x52525B, 0xA1A1AA)
-        }
     }
 
     /// 这个颜色叫什么。选色盘上的色块看得见颜色，不写字 —— 名字是给悬停提示和读屏用的。
