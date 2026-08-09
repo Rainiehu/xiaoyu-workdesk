@@ -130,7 +130,7 @@ struct CategoryTodoList: View {
     }
 }
 
-/// 一行待办：左边的圆圈打勾/取消，悬停时右边浮出删除，单击整行就地改写，
+/// 一行待办：左边的圆圈打勾/取消，悬停时右边浮出排期入口与删除，单击整行就地改写，
 /// 右键是同样这两件事的菜单入口。已完成的不带删除线 —— 完成的事情读起来该仍然清晰体面。
 /// 淡化交给所在那一列，行本身不管。
 ///
@@ -164,13 +164,14 @@ private struct TodoRow: View {
 
             Spacer(minLength: 8)
 
-            // 完成了的行上，日期是完成日，而且只是个标签 —— 它说明右列为什么这么排。
-            // 排期入口留给还没做的事：做完了再改期没有意义，真要改，取消打勾就回到左列。
+            // 完成了的行上，常驻的日期是完成日，而且只是个标签 —— 它说明右列为什么这么排。
+            // 排期入口照样有，只是不再画计划日标签：一行上一个日期就够了，而这一格的职责是解释排序。
             // 有完成日就等于完成了，这条由 `Store` 保证，所以这儿只问一次。
             if let completedAt = todo.completedAt {
                 Text(completedAt.dayLabel(relativeTo: clock.today))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                PlannedDayControl(todo: todo, rowHovering: hovering, showsDate: false)
             } else {
                 PlannedDayControl(todo: todo, rowHovering: hovering)
             }

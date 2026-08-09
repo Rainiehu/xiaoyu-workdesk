@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// 一条待办的计划日入口。排期与改期是同一件事：不论排没排期，悬停时都浮出同一个日历图标，
-/// 点开同一个面板 —— 入口不随行的状态换模样，看见图标就知道这一下是干什么的。
+/// 一条待办的计划日入口。排期与改期是同一件事：不论排没排期、完没完成，悬停时都浮出
+/// 同一个日历图标，点开同一个面板 —— 入口不随行的状态换模样，看见图标就知道这一下是干什么的。
+/// 四处的行（分类视图两列、轴上、未排期列）都是这一个入口。
 /// 已排期的行另有一个日期标签，但它只是标签，和完成行上的完成日一样安静，不接点击。
 ///
 /// 计划日在过去还是将来，日期标签的写法一模一样：不变色、不加徽标 ——
@@ -11,11 +12,14 @@ struct PlannedDayControl: View {
     let todo: TodoItem
     /// 整行是不是正被悬停 —— 入口只在悬停时露面，静止时行上只有日期这个安静的标签。
     let rowHovering: Bool
+    /// 常驻的日期标签画不画。轴上不画（那天写在组头上，行上再挂一遍是重复的灰字），
+    /// 分类视图右列不画（那格常驻的是完成日，由所在那列自己画）—— 两处只要悬浮的图标。
+    var showsDate: Bool = true
 
     @State private var presented = false
 
     var body: some View {
-        if let planned = todo.plannedOn {
+        if showsDate, let planned = todo.plannedOn {
             Text(planned.dayLabel(relativeTo: clock.today))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -47,8 +51,11 @@ struct PlannedDayControl: View {
     }
 }
 
-/// 计划日面板：几个常用快捷项、一个完整日历，以及清除计划日。
+/// 计划日面板：几个常用快捷项、一个完整日历。
 /// 只问哪一天，不问几点 —— 选出来的日子天然落在当天零点。
+///
+/// 取消排期没有单独的按钮：点到它已排的那一天，就是取消 —— 日历上点、快捷键点，同一条规矩。
+/// 面板因此不随行的状态换模样，排没排期、完没完成，长的都是这一副。
 private struct PlannedDayPanel: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
@@ -78,26 +85,14 @@ private struct PlannedDayPanel: View {
             DatePicker("", selection: selection, displayedComponents: .date)
                 .datePickerStyle(.graphical)
                 .labelsHidden()
-            if todo.plannedOn != nil {
-                Divider()
-                Button {
-                    store.clearPlannedDay(todo)
-                    dismiss()
-                } label: {
-                    Label("清除计划日", systemImage: "xmark.circle")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
         }
         .padding(14)
         .frame(width: 260)
     }
 
-    /// 日历上点一下就是排期。写在 setter 里而不是 `onChange` 里 —— `onChange` 只在值变了才响，
-    /// 未排期的待办点「今天」（日历上正落脚在这儿）就会什么也不发生。
+    /// 日历上点一下就是排期，点到已排的那天就是取消。写在 setter 里而不是 `onChange` 里 ——
+    /// `onChange` 只在值变了才响，点已排的那天（日历上正落脚在这儿）就会什么也不发生，
+    /// 而那一下正是取消排期的那一下。
     private var selection: Binding<Date> {
         Binding {
             picked
@@ -127,8 +122,14 @@ private struct PlannedDayPanel: View {
         return Calendar.current.date(byAdding: .day, value: offset, to: start) ?? start
     }
 
+    /// 排到这一天；已经排在这一天的，这一下就是取消。
+    /// 「是不是同一天」用 `Calendar` 比 —— 底下存着时刻，`==` 会把同一天认成两天。
     private func schedule(_ day: Date) {
-        store.setPlannedDay(day, for: todo)
+        if let planned = todo.plannedOn, Calendar.current.isDate(planned, inSameDayAs: day) {
+            store.clearPlannedDay(todo)
+        } else {
+            store.setPlannedDay(day, for: todo)
+        }
         dismiss()
     }
 }
