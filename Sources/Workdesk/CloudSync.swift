@@ -49,7 +49,12 @@ final class CloudSync: CKSyncEngineDelegate {
     /// 连续没同步成功的天数（不足 `staleAfterDays` 天就是 `nil`）。
     private var staleDays: Int?
     /// 上次与云端说上话的时刻。首次启动时从当下起算 —— 没有比这更早的可比对象。
-    private var lastSuccessAt: Date?
+    /// 记号悬停时说的「多久之前」就是它。
+    private(set) var lastSuccessAt: Date?
+
+    /// 同步这回事在这个构建里到底有没有开张。没带 iCloud 权限的构建里是 false ——
+    /// 那时侧边栏不该挂一朵云出来说谎，app 就是一台单机 app。
+    private(set) var active = false
 
     /// 侧边栏那个记号看的就是它。`nil` 就什么记号也没有。
     /// 账号没了 > 配额满了 > 多日不通 —— 一次只说最要紧的一件。
@@ -86,6 +91,7 @@ final class CloudSync: CKSyncEngineDelegate {
         guard !started else { return }
         started = true
         guard Self.entitledToCloudKit else { return }
+        active = true
 
         let saved = loadSavedState()
         engineState = saved?.stateSerialization
