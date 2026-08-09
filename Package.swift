@@ -12,6 +12,7 @@ let package = Package(
     products: [
         // iOS 的 Xcode 工程从包外引用核心与 iOS 界面，得有 library 产品可拿。
         .library(name: "WorkdeskCore", targets: ["WorkdeskCore"]),
+        .library(name: "WorkdeskiOS", targets: ["WorkdeskiOS"]),
     ],
     targets: [
         // 平台中立的核心：模型、Store、TodayClock 与同步全套。两端 UI 共用这一份，
@@ -19,6 +20,15 @@ let package = Package(
         .target(
             name: "WorkdeskCore",
             path: "Sources/WorkdeskCore",
+            swiftSettings: swift5Mode
+        ),
+        // iOS 界面。住在包里而不是 Xcode 工程里，好让加减 UI 文件不必手改 pbxproj；
+        // 文件整个用 #if os(iOS) 圈住，在 macOS 上编成空模块，swift test 因此照跑。
+        // Xcode 那边只剩一个 @main 薄壳（ios/），链接这个产品。
+        .target(
+            name: "WorkdeskiOS",
+            dependencies: ["WorkdeskCore"],
+            path: "Sources/WorkdeskiOS",
             swiftSettings: swift5Mode
         ),
         // macOS 界面与应用入口。

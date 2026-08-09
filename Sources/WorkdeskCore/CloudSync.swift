@@ -78,11 +78,16 @@ public final class CloudSync: CKSyncEngineDelegate {
     /// 这个构建有没有带 iCloud 权限。`swift run`、ad-hoc 或本机证书签的开发构建没有 ——
     /// 那时同步整个不启动，一声不吭：断没断网都轮不到它说话。
     nonisolated static var entitledToCloudKit: Bool {
-        #if os(iOS)
-        // iOS 上没有 SecTask 这套自查接口，而 iOS 的 app 必经 Xcode 签名，
-        // entitlement 由工程配置保证 —— 配漏了在首次 CKContainer 调用时就会当场暴露，
-        // 不会像 Mac 的 ad-hoc 构建那样「签名齐全、同步默不作声」。
-        return true
+        #if os(iOS) && targetEnvironment(simulator)
+        // 模拟器构建可以不带签名（CI 验证正是这么编的），那时 CKContainer 一碰就炸 ——
+        // 而签名里带没带 entitlement 在 iOS 上没有 SecTask 那样的自查口。
+        // 模拟器就当单机 app 验证界面，同步的验证在真机上做。
+        return false
+        #elseif os(iOS)
+        // 插线直装的开发构建总封着 embedded.mobileprovision，entitlement 随 profile 走 ——
+        // 有它就是有门票。（App Store/TestFlight 构建没有这个文件，但那不是这个 app 的路，
+        // 见 ADR-0006。）
+        return Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") != nil
         #else
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(task, "com.apple.developer.icloud-services" as CFString, nil)

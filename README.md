@@ -52,6 +52,16 @@ ln -s "$PWD/build/案头.app" "/Applications/案头.app"
 
 3. **ad-hoc** —— 什么都没有时的兜底。签名**每次重建都不一样**，macOS 会把每次构建当成另一个程序，按程序记的授权每次都要重点一遍。
 
+### iOS 版
+
+`ios/Workdesk.xcodeproj` 是个手写的最小工程：代码全在仓库根的 SwiftPM 包里（`WorkdeskCore` + `WorkdeskiOS`），工程里只有一个 `@main` 薄壳和签名配置 —— 加减 UI 文件不用改工程。装到手机：Xcode 打开这个工程，选中自己的 iPhone，Run（自动签名走 Xcode 里登录的开发者账号）。模拟器构建刻意不启动同步（签名可以不带 entitlements，CloudKit 一碰就炸），真机构建带着 profile 就自动接上 —— 与 Mac 版同一个 iCloud 容器，同一份待办。
+
+```bash
+# 不开 Xcode 验证一把（模拟器，免签名）：
+xcodebuild -project ios/Workdesk.xcodeproj -scheme Workdesk \
+    -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
 ### AI 用量的数据从哪来
 
 - **用了多少** — 本地日志。Claude 在 `~/.claude/projects/**/*.jsonl`，Codex 在 `~/.codex/sessions/`。Claude 把缓存读写单列在 `cache_read_input_tokens` / `cache_creation_input_tokens`，Codex 则把缓存读算进 `input_tokens` 里 —— 两边都摊平成输入/输出/缓存读/缓存写四项之后才可比。
