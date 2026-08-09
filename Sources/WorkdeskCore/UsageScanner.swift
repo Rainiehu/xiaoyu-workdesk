@@ -4,6 +4,8 @@ import Foundation
 ///
 /// 日志只说「用了多少」。Claude 的「还剩多少」得走 `ClaudeUsageAPI`；Codex 则把限流状态
 /// 一并写在 rollout 日志里，这里顺手取了。
+// 扫的是这台 Mac 上的会话日志，iOS 上无此物 —— 整个文件只属于 macOS。
+#if os(macOS)
 enum UsageScanner {
     static func scan() -> (claude: ToolUsage, codex: ToolUsage, codexWindows: [UsageWindow]) {
         let (codex, windows) = scanCodex()
@@ -205,3 +207,5 @@ enum UsageScanner {
         return Double(chars)
     }
 }
+
+#endif

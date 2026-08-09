@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 /// 把账本清空：欠的保存全当送达，墓碑全当撤掉。
 /// 冲突的测试靠它先把「已同步」这个起点摆出来 —— 之后的改动才是冲突里的那一笔。
@@ -114,7 +114,7 @@ struct SyncMergeTests {
 
     @Test("一边改名、一边换色，分类两边都保住；位置相争后写胜")
     func categoryAspectsMergeIndependently() {
-        let base = PlacedCategory(category: Workdesk.Category(name: "原名", color: .teal), position: 1)
+        let base = PlacedCategory(category: WorkdeskCore.Category(name: "原名", color: .teal), position: 1)
         var mine = base
         mine.category.name = "本机改的名"
         mine.position = 0

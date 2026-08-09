@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 @Suite("用量与限流")
 struct UsageTests {

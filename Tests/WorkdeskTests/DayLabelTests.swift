@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 @Suite("日期显示")
 struct DayLabelTests {

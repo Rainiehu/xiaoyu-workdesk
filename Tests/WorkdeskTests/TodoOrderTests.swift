@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 /// 左列的顺序归使用者自己拖，见 ADR-0002。
 @MainActor

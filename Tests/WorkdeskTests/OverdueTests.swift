@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 /// 「过期」的口径：未完成 ∧ 计划日在今天之前，见 ADR-0004。
 /// 纯派生判断，不用建 Store —— 这里拿 `TodoItem` 直接问。

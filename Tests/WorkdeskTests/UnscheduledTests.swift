@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 /// 沙漏视图右边那一列：还没排期的未完成待办，按分类分组。
 @MainActor

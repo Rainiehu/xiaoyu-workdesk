@@ -92,11 +92,22 @@ swift test
 ## 项目结构
 
 ```
-Sources/Workdesk/
+Sources/WorkdeskCore/     平台中立的核心，macOS 与 iOS 两端 UI 共用（ADR-0006）
+  Models.swift            数据模型
+  Store.swift             状态与持久化（AI 用量一段只编进 macOS）
+  TodayClock.swift        「今天是哪天」的那一个答案，跨零点自己跟上
+  CloudSync.swift         iCloud 同步引擎（CKSyncEngine）与故障记号
+  SyncStatus.swift        同步记号的三态与措辞
+  SyncChangeLog.swift     同步的账本：待发队列与墓碑
+  SyncMerge.swift         字段级合并：两边各改一个方面时两边都保住
+  SyncShadows.swift       同步的记性：影子副本与分类的殉葬品
+  SyncRecords.swift       CloudKit 记录的打包与解包
+  UsageScanner.swift      扫描本地日志统计 token，并取 Codex 的限流窗口（仅 macOS）
+  UsageLimits.swift       用量与限流的数据模型，以及接口返回的解析
+  ClaudeUsageAPI.swift    取 Claude 的限流状态（钥匙串 + /api/oauth/usage，仅 macOS）
+Sources/Workdesk/         macOS 界面
   WorkdeskApp.swift       应用入口
   ContentView.swift       侧边栏 + 分栏导航
-  Models.swift            数据模型
-  Store.swift             状态与持久化
   MainlineView.swift      主线：分类 tab 栏、新建分类、引导空态
   CategoryTodoList.swift  分类视图：记事输入框，待完成/已完成两列
   HourglassView.swift     沙漏视图：顶部记事输入区，按计划日铺开的时间轴，拖拽改期
@@ -105,13 +116,8 @@ Sources/Workdesk/
   TodoInputField.swift    记事输入框，两个视图共用
   PlannedDayControl.swift 一条待办的排期入口与计划日面板
   FavoritesView.swift     收藏流
-  CloudSync.swift         iCloud 同步引擎（CKSyncEngine）与故障记号
-  SyncChangeLog.swift     同步的账本：待发队列与墓碑
-  SyncRecords.swift       CloudKit 记录的打包与解包
+  SyncStatusMark.swift    侧边栏常驻的同步记号
   UsageCard.swift         AI 用量卡片，每分钟自刷
-  UsageScanner.swift      扫描本地日志统计 token，并取 Codex 的限流窗口
-  UsageLimits.swift       用量与限流的数据模型，以及接口返回的解析
-  ClaudeUsageAPI.swift    取 Claude 的限流状态（钥匙串 + /api/oauth/usage）
 Tests/WorkdeskTests/
   StoreTests.swift           存储目录与收藏流的持久化
   CategoryTests.swift        分类的新建、配色与持久化

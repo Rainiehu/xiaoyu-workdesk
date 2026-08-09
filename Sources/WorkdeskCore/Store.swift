@@ -3,20 +3,22 @@ import Observation
 
 @Observable
 @MainActor
-final class Store {
+public final class Store {
     /// 分类的显示顺序就是这个数组的顺序。
-    private(set) var categories: [Category] = []
-    private(set) var todos: [TodoItem] = []
-    private(set) var favorites: [FavoriteItem] = []
-    var usage: UsageSnapshot?
-    var usageLoading = false
+    public private(set) var categories: [Category] = []
+    public private(set) var todos: [TodoItem] = []
+    public private(set) var favorites: [FavoriteItem] = []
+    #if os(macOS)
+    public var usage: UsageSnapshot?
+    public var usageLoading = false
+    #endif
 
     /// 上次选来记事的分类。可能指向一个已经不在了的分类 —— 对外的 `recordingCategory` 管这件事。
     private var chosenRecordingCategoryID: Category.ID?
 
     /// 同步的账本：本地增删改先记账，云端慢慢结清。待办、分类与收藏都记在这一本上。
     /// 没有同步引擎的构建里它照记不误 —— 账不会丢，哪天引擎接上了照账补发。
-    private(set) var syncLog = SyncChangeLog()
+    public private(set) var syncLog = SyncChangeLog()
 
     /// 同步的记性：影子副本（字段级合并的「上一次」）与分类的殉葬品（复活的料）。
     /// 与账本一样随数据落盘 —— 冲突可能隔着一次重启才撞上。
@@ -32,7 +34,7 @@ final class Store {
     @ObservationIgnored var syncLogDidChange: (() -> Void)?
 
     /// 正常运行时的存储位置。只算路径，不建目录 —— 建目录是 `init` 的事。
-    nonisolated static var defaultDirectory: URL {
+    public nonisolated static var defaultDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("XiaoyuWorkdesk", isDirectory: true)
     }
@@ -40,7 +42,7 @@ final class Store {
     private let directory: URL
 
     /// - Parameter directory: 存储目录，默认是 `defaultDirectory`。测试传一个临时目录进来。
-    init(directory: URL = Store.defaultDirectory) {
+    public init(directory: URL = Store.defaultDirectory) {
         self.directory = directory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         categories = load(Self.categoriesFile) ?? []
@@ -85,7 +87,7 @@ final class Store {
     /// 新建一个分类。只要一个名字 —— 颜色从色板里按顺序取下一个还没被占用的，用户不参与选色。
     /// 名字为空（或只有空白）时不建，返回 `nil`。
     @discardableResult
-    func addCategory(_ name: String) -> Category? {
+    public func addCategory(_ name: String) -> Category? {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty else { return nil }
         let category = Category(name: n, color: nextColor())
@@ -105,13 +107,13 @@ final class Store {
 
     /// 按 id 找回一个分类。沙漏视图里每条待办旁的彩色 tag 靠它取名字和颜色 ——
     /// 找不着（分类被删了）就是 `nil`，视图层照着这个决定要不要画那个 tag。
-    func category(_ id: Category.ID) -> Category? {
+    public func category(_ id: Category.ID) -> Category? {
         categories.first { $0.id == id }
     }
 
     /// 改名。空白名字不改 —— 与 `addCategory` 同一副脾气：分类总得有个名字。
     /// 名字只是称呼，改它碰不到分类的身份，里头的待办一条也不动。
-    func renameCategory(_ id: Category.ID, to name: String) {
+    public func renameCategory(_ id: Category.ID, to name: String) {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty else { return }
         updateCategory(id) { $0.name = n }
@@ -119,7 +121,7 @@ final class Store {
 
     /// 换颜色。新建时颜色是自动分配的，这里是唯一由用户指定颜色的入口。
     /// 不拦重色 —— 两个分类撞色是用户自己的选择，不该被拦下。
-    func recolorCategory(_ id: Category.ID, to color: CategoryColor) {
+    public func recolorCategory(_ id: Category.ID, to color: CategoryColor) {
         updateCategory(id) { $0.color = color }
     }
 
@@ -127,7 +129,7 @@ final class Store {
     /// tab 栏上拖着一个 tab 放到另一个 tab 上时走这条路，于是最常用的可以排到前头。
     /// 说的是「放到谁身上」而不是第几位：顺序是 `Store` 的事，视图层不必先去数位置。
     /// 两个都是同一个分类、或者哪一个不存在，都什么也不发生。
-    func moveCategory(_ id: Category.ID, onto targetID: Category.ID) {
+    public func moveCategory(_ id: Category.ID, onto targetID: Category.ID) {
         guard let from = categories.firstIndex(where: { $0.id == id }),
               let to = categories.firstIndex(where: { $0.id == targetID }), from != to else { return }
         categories.insert(categories.remove(at: from), at: to)
@@ -143,7 +145,7 @@ final class Store {
 
     /// 除了这一个之外的分类。待办的「移到分类」菜单列的就是它们 ——
     /// 一条待办没法移到它已经在的地方。
-    func categories(besides categoryID: Category.ID) -> [Category] {
+    public func categories(besides categoryID: Category.ID) -> [Category] {
         categories.filter { $0.id != categoryID }
     }
 
@@ -154,7 +156,7 @@ final class Store {
     /// 疏通的路子是 `moveTodo(_:to:)` 或删掉那些待办：分类空了，它自然就删得掉了。
     /// 删到一个不剩是允许的 —— 那时主线回到引导空态，与首次启动是同一个状态。
     @discardableResult
-    func deleteCategory(_ id: Category.ID) -> CategoryDeletion {
+    public func deleteCategory(_ id: Category.ID) -> CategoryDeletion {
         guard let index = categories.firstIndex(where: { $0.id == id }) else { return .noSuchCategory }
         let mine = todos(in: id)
         guard mine.isEmpty else { return .refused(todoCount: mine.count) }
@@ -186,13 +188,13 @@ final class Store {
     /// 沙漏视图记事时归到哪个分类：上次选的那个。还没选过、或选的那个分类没了，
     /// 就落回第一个分类 —— 「记不起来」于是不是一个要视图层去应付的状态。
     /// 一个分类都没有时是 `nil`：那时无处可记，也就不该记出一条无归属的待办。
-    var recordingCategory: Category? {
+    public var recordingCategory: Category? {
         chosenRecordingCategoryID.flatMap(category) ?? categories.first
     }
 
     /// 选一个分类来记事。这个选择跨重启保留，好让连续记同一类事情不必反复选。
     /// 指向不存在的分类时什么也不发生，与 `addTodo` 同一副脾气。
-    func chooseRecordingCategory(_ id: Category.ID) {
+    public func chooseRecordingCategory(_ id: Category.ID) {
         guard categories.contains(where: { $0.id == id }) else { return }
         chosenRecordingCategoryID = id
         savePreferences()
@@ -204,7 +206,7 @@ final class Store {
     /// 一个分类都没有时什么也不发生：那时无处可记，也就不该记出一条无归属的待办。
     /// - Parameter today: 「今天」由调用方交进来，与 `timeline(today:)` 同一副脾气 ——
     ///   这件事因此可测，也没有哪一处偷偷去问一次时钟。交的是时刻，排上的是那个日子。
-    func recordOnTimeline(_ text: String, today: Date) {
+    public func recordOnTimeline(_ text: String, today: Date) {
         guard let category = recordingCategory else { return }
         addTodo(text, in: category.id, plannedOn: today.dayStart)
     }
@@ -212,7 +214,7 @@ final class Store {
     // MARK: - Todos
 
     /// 侧边栏徽标要的数字。派生数据一律从这里出，视图层不自己聚合。
-    var unfinishedTodoCount: Int {
+    public var unfinishedTodoCount: Int {
         todos.filter { !$0.done }.count
     }
 
@@ -224,7 +226,7 @@ final class Store {
     /// 计划日在过去而未完成的待办也只是留在它那一天，这里不给它任何特殊位置，见 ADR-0001。
     /// - Parameter today: 「今天」是哪天。刻意没有默认值 —— 由调用方交进来，
     ///   分组因此既可测，也不会有哪一处偷偷去问一次时钟。
-    func timeline(today: Date) -> [TimelineDay] {
+    public func timeline(today: Date) -> [TimelineDay] {
         var byDay: [Date: [TodoItem]] = [today.dayStart: []]
         for todo in todos {
             guard let planned = todo.plannedOn else { continue }
@@ -241,7 +243,7 @@ final class Store {
     /// 不是缺失。已完成的不在这儿：这一列问的是「还有什么没安排」。
     /// 一条也没有的分类不成组，右列因此是紧凑的。
     /// 组内的先后与分类视图左列一致（使用者自己拖出来的那个），两处看到的顺序永远是同一个。
-    var unscheduled: [UnscheduledGroup] {
+    public var unscheduled: [UnscheduledGroup] {
         categories.compactMap { category in
             let mine = Self.ordered(todos(in: category.id).filter { !$0.done && $0.plannedOn == nil })
             return mine.isEmpty ? nil : UnscheduledGroup(category: category, todos: mine)
@@ -249,7 +251,7 @@ final class Store {
     }
 
     /// 一个分类里的待办，按记下的先后排列。分类之间因此互不干扰。
-    func todos(in categoryID: Category.ID) -> [TodoItem] {
+    public func todos(in categoryID: Category.ID) -> [TodoItem] {
         todos.filter { $0.categoryID == categoryID }
     }
 
@@ -260,7 +262,7 @@ final class Store {
     /// 混在一列里，靠行尾日期标签的有无自然区分。
     ///
     /// 右列按完成日从新到旧，最近的成果在最上面 —— 那是一份记录，不由人排。
-    func columns(in categoryID: Category.ID) -> CategoryColumns {
+    public func columns(in categoryID: Category.ID) -> CategoryColumns {
         let mine = todos(in: categoryID)
         let unfinished = Self.ordered(mine.filter { !$0.done })
         // 打了勾就必然有完成日；万一数据里缺了，退回创建日 ——
@@ -281,7 +283,7 @@ final class Store {
     /// - Parameter day: 一并排上的计划日，默认不排 —— 分类视图里记事就是不排期的，
     ///   排期是之后另点一下的事。沙漏视图里记事则当场交一个日子进来，
     ///   好让新记下的这条立刻出现在使用者正看着的那条轴上。
-    func addTodo(_ text: String, in categoryID: Category.ID, plannedOn day: Date? = nil) {
+    public func addTodo(_ text: String, in categoryID: Category.ID, plannedOn day: Date? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, categories.contains(where: { $0.id == categoryID }) else { return }
         let item = TodoItem(text: t, categoryID: categoryID, plannedOn: day, order: topOrder(in: categoryID))
@@ -299,7 +301,7 @@ final class Store {
     /// 打勾/取消打勾。完成时刻原样落盘 —— 截到天是显示层的事，底下留着全时刻，
     /// 于是同一天完成的几条仍分得出先后。取消打勾就把它清掉，
     /// 于是「没有完成日」和「没完成」永远是同一件事。
-    func toggleTodo(_ item: TodoItem) {
+    public func toggleTodo(_ item: TodoItem) {
         update(item.id) {
             $0.done.toggle()
             $0.completedAt = $0.done ? .now : nil
@@ -312,14 +314,14 @@ final class Store {
     /// 只动正文：归属分类、三个日子与完成状态都不变。
     /// 空白正文不改，与 `addTodo`、`renameCategory` 同一副脾气 —— 待办总得有句话；
     /// 删除是另一条路，不该由「把字删光」触发。
-    func editTodo(_ item: TodoItem, to text: String) {
+    public func editTodo(_ item: TodoItem, to text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         update(item.id) { $0.text = t }
     }
 
     /// 排上计划日，或改到另一天。只动计划日 —— 创建日与完成日各存各的，改期碰不到它们。
-    func setPlannedDay(_ day: Date, for item: TodoItem) {
+    public func setPlannedDay(_ day: Date, for item: TodoItem) {
         update(item.id) { $0.plannedOn = day }
     }
 
@@ -332,13 +334,13 @@ final class Store {
     /// - Returns: 这一放是否落到了实处。找不着那条待办（比如它同时被删了）就是 `false`，
     ///   视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
-    func reschedule(_ id: TodoItem.ID, to day: Date) -> Bool {
+    public func reschedule(_ id: TodoItem.ID, to day: Date) -> Bool {
         update(id) { $0.plannedOn = day }
     }
 
     /// 清除计划日，待办回到未排期。未排期是个正常状态，不是缺失 ——
     /// 「总得做但不急」的事就该一直待在这儿。
-    func clearPlannedDay(_ item: TodoItem) {
+    public func clearPlannedDay(_ item: TodoItem) {
         update(item.id) { $0.plannedOn = nil }
     }
 
@@ -347,7 +349,7 @@ final class Store {
     ///
     /// 只改归属：计划日、创建日、完成日与完成状态都不因换分类而变 —— 横轴上的移动不碰纵轴。
     /// 目标分类不存在时什么也不发生，于是「每条待办都落在某个分类里」这条约束在这儿也守得住。
-    func moveTodo(_ item: TodoItem, to categoryID: Category.ID) {
+    public func moveTodo(_ item: TodoItem, to categoryID: Category.ID) {
         moveTodo(item.id, to: categoryID)
     }
 
@@ -359,7 +361,7 @@ final class Store {
     /// 目标就是它已经在的那个分类时什么也不发生 —— 那不是一次移动，位置也不该因此被动过。
     /// - Returns: 这一移是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
-    func moveTodo(_ id: TodoItem.ID, to categoryID: Category.ID) -> Bool {
+    public func moveTodo(_ id: TodoItem.ID, to categoryID: Category.ID) -> Bool {
         guard categories.contains(where: { $0.id == categoryID }),
               let item = todos.first(where: { $0.id == id }), item.categoryID != categoryID else { return false }
         let top = topOrder(in: categoryID)
@@ -377,7 +379,7 @@ final class Store {
     /// 跨分类的拖拽不存在，改归属是把它拖到 tab 上的事。
     /// - Returns: 这一放是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
-    func reorderTodo(_ id: TodoItem.ID, onto targetID: TodoItem.ID) -> Bool {
+    public func reorderTodo(_ id: TodoItem.ID, onto targetID: TodoItem.ID) -> Bool {
         guard id != targetID,
               let moved = todos.first(where: { $0.id == id }),
               let target = todos.first(where: { $0.id == targetID }),
@@ -405,7 +407,7 @@ final class Store {
         }
     }
 
-    func deleteTodo(_ item: TodoItem) {
+    public func deleteTodo(_ item: TodoItem) {
         todos.removeAll { $0.id == item.id }
         saveTodos()
         logSyncChange { $0.recordDelete(item.changeEntry) }
@@ -425,7 +427,7 @@ final class Store {
 
     // MARK: - Favorites
 
-    func addFavorite(_ raw: String) {
+    public func addFavorite(_ raw: String) {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         let item: FavoriteItem
@@ -441,7 +443,7 @@ final class Store {
         logSyncChange { $0.recordSave(item.changeEntry) }
     }
 
-    func deleteFavorite(_ item: FavoriteItem) {
+    public func deleteFavorite(_ item: FavoriteItem) {
         favorites.removeAll { $0.id == item.id }
         saveFavorites()
         logSyncChange { $0.recordDelete(item.changeEntry) }
@@ -684,9 +686,12 @@ final class Store {
     }
 
     // MARK: - Usage
+    // 用量整段只属于 macOS：数据源（本地会话日志、钥匙串）都在那台 Mac 上，
+    // 「偏好与用量是这台机器自己的事」—— iOS 构建里这一段整个不存在。
+    #if os(macOS)
 
     /// 本地日志多久重扫一次。读几个文件而已，不花什么，一分钟一次。
-    nonisolated static let usageRefreshInterval: TimeInterval = 60
+    public nonisolated static let usageRefreshInterval: TimeInterval = 60
 
     /// 限流接口多久调一次。刻意比扫描慢得多：5 小时的窗口最快也就涨 0.33%/分钟，
     /// 一刻钟问一次，两次之间最多动 5%，看这种数字足够了。
@@ -704,7 +709,7 @@ final class Store {
 
     /// - Parameter force: 手动点刷新时为真，越过接口自己的节奏立刻问一次 ——
     ///   人点了按钮却什么都不动，比多发一次请求更糟。定时刷新不走这条路。
-    func refreshUsage(force: Bool = false) {
+    public func refreshUsage(force: Bool = false) {
         guard !usageLoading else { return }
         usageLoading = true
         // 接口有它自己的节奏，跟本地扫描分开 —— 扫描每分钟一次，它五分钟一次，被限流还要再退。
@@ -765,6 +770,8 @@ final class Store {
         guard rateLimited else { return 0 }
         return min(max(current * 2, usageLimitsInterval), usageLimitsBackoffCap)
     }
+
+    #endif
 
     // MARK: - Persistence
 

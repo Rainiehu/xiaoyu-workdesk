@@ -1,4 +1,5 @@
 import SwiftUI
+import WorkdeskCore
 
 struct FavoritesView: View {
     @Environment(Store.self) private var store

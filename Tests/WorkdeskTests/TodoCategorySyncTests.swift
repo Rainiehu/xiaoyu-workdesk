@@ -2,7 +2,7 @@ import CloudKit
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 /// 把账本清空：欠的保存全当送达，墓碑全当撤掉。
 /// 记账的测试靠它先把场地扫干净，之后账上出现什么就全是那一步操作记下的。
@@ -222,9 +222,9 @@ struct RemoteTodoCategoryLandingTests {
     /// 待办落地时它的分类也已经在了。
     @Test("一批抓来的记录不论次序，摆正后铺出同一排 tab")
     func fetchedBatchLandsInPositionOrder() throws {
-        let a = Workdesk.Category(name: "甲", color: .teal)
-        let b = Workdesk.Category(name: "乙", color: .orange)
-        let c = Workdesk.Category(name: "丙", color: .indigo)
+        let a = WorkdeskCore.Category(name: "甲", color: .teal)
+        let b = WorkdeskCore.Category(name: "乙", color: .orange)
+        let c = WorkdeskCore.Category(name: "丙", color: .indigo)
         var todo = TodoItem(text: "夹在中间的待办", categoryID: b.id)
         todo.order = 0
         let arrivals = [[0, 1, 2], [2, 1, 0], [1, 2, 0], [2, 0, 1], [0, 2, 1], [1, 0, 2]]
@@ -237,9 +237,9 @@ struct RemoteTodoCategoryLandingTests {
                 for record in CloudSync.landingOrder(batch) {
                     switch record.recordType {
                     case SyncSchema.categoryType:
-                        let category = Workdesk.Category(record: record)
+                        let category = WorkdeskCore.Category(record: record)
                         store.applyRemoteCategory(
-                            try #require(category), position: Workdesk.Category.position(in: record)
+                            try #require(category), position: WorkdeskCore.Category.position(in: record)
                         )
                     case SyncSchema.todoType:
                         store.applyRemoteTodo(try #require(TodoItem(record: record)))
@@ -281,7 +281,7 @@ struct RemoteTodoCategoryLandingTests {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let mine = try #require(store.addCategory("工作"))
-            let theirs = Workdesk.Category(name: "工作", color: .blue)
+            let theirs = WorkdeskCore.Category(name: "工作", color: .blue)
             store.applyRemoteCategory(theirs, position: 1)
 
             #expect(store.categories.count == 2)
@@ -293,7 +293,7 @@ struct RemoteTodoCategoryLandingTests {
     func remoteChangesStayOffTheBooks() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
-            let category = Workdesk.Category(name: "云端建的", color: .teal)
+            let category = WorkdeskCore.Category(name: "云端建的", color: .teal)
             store.applyRemoteCategory(category, position: 0)
             var todo = TodoItem(text: "云端记的", categoryID: category.id)
             todo.order = 0
@@ -402,7 +402,7 @@ struct RemoteTodoCategoryLandingTests {
     func orphanWaitsForItsCategory() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
-            let category = Workdesk.Category(name: "还在路上", color: .teal)
+            let category = WorkdeskCore.Category(name: "还在路上", color: .teal)
             var todo = TodoItem(text: "先到的", categoryID: category.id)
             todo.order = 0
 
@@ -421,7 +421,7 @@ struct RemoteTodoCategoryLandingTests {
     func orphansSurviveRelaunch() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
-            let category = Workdesk.Category(name: "还在路上", color: .teal)
+            let category = WorkdeskCore.Category(name: "还在路上", color: .teal)
             var todo = TodoItem(text: "先到的", categoryID: category.id)
             todo.order = 0
             store.applyRemoteTodo(todo)
@@ -445,7 +445,7 @@ struct RemoteTodoCategoryLandingTests {
             // 账清了 —— 这条测试说的是时序（分类晚到），不是冲突（本地并没有在改它）。
             settleAll(store)
 
-            let elsewhere = Workdesk.Category(name: "还在路上", color: .blue)
+            let elsewhere = WorkdeskCore.Category(name: "还在路上", color: .blue)
             var theirs = mine
             theirs.categoryID = elsewhere.id
             store.applyRemoteTodo(theirs)
@@ -546,20 +546,20 @@ struct TodoCategoryRecordTests {
 
     @Test("分类打包成记录再解回来，位置也在")
     func categoryRecordRoundTrip() throws {
-        let category = Workdesk.Category(name: "工作", color: .indigo)
+        let category = WorkdeskCore.Category(name: "工作", color: .indigo)
         let record = category.makeRecord(position: 4)
         #expect(record.recordID.recordName == category.id.uuidString)
-        #expect(Workdesk.Category(record: record) == category)
-        #expect(Workdesk.Category.position(in: record) == 4)
+        #expect(WorkdeskCore.Category(record: record) == category)
+        #expect(WorkdeskCore.Category.position(in: record) == 4)
     }
 
     /// 更新的版本也许添了新颜色 —— 丢整个分类会连坐一串待办，颜色不对只是颜色不对。
     @Test("认不出的色名落到石墨色，分类本身不丢")
     func unknownColorFallsBackToSlate() throws {
-        let record = Workdesk.Category(name: "来自未来", color: .teal).makeRecord(position: 0)
+        let record = WorkdeskCore.Category(name: "来自未来", color: .teal).makeRecord(position: 0)
         record["color"] = "hologram"
         // 先接住再 #require —— 类型名带模块前缀时，宏展开会在这个调用上绊倒。
-        let decoded = Workdesk.Category(record: record)
+        let decoded = WorkdeskCore.Category(record: record)
         let back = try #require(decoded)
         #expect(back.color == .slate)
         #expect(back.name == "来自未来")
@@ -567,15 +567,15 @@ struct TodoCategoryRecordTests {
 
     @Test("缺了位置的分类排到最后，缺了称呼的解不出")
     func categoryRecordEdges() {
-        let record = Workdesk.Category(name: "没位置", color: .teal).makeRecord(position: 0)
+        let record = WorkdeskCore.Category(name: "没位置", color: .teal).makeRecord(position: 0)
         record["position"] = nil
-        #expect(Workdesk.Category.position(in: record) == .max)
+        #expect(WorkdeskCore.Category.position(in: record) == .max)
 
         let noName = CKRecord(
             recordType: SyncSchema.categoryType,
             recordID: CKRecord.ID(recordName: UUID().uuidString, zoneID: SyncSchema.zoneID)
         )
-        #expect(Workdesk.Category(record: noName) == nil)
+        #expect(WorkdeskCore.Category(record: noName) == nil)
     }
 
     /// 系统字段归档再解回来，身份还在 —— 引擎重启后照样打得回旧底子上。

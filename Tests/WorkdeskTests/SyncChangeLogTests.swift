@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 @Suite("SyncChangeLog")
 struct SyncChangeLogTests {
