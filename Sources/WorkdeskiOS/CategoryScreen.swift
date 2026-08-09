@@ -91,25 +91,29 @@ private struct CategoryRow: View {
     let todo: TodoItem
     let tint: Color
 
+    @State private var editing = TodoEditing()
+
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
             TodoToggle(done: todo.done, overdue: todo.isOverdue(today: clock.today), tint: tint) {
                 store.toggleTodo(todo)
             }
 
-            Text(todo.text)
-                .multilineTextAlignment(.leading)
+            TodoText(todo: todo, editing: $editing)
 
             Spacer(minLength: 8)
 
-            if let planned = todo.plannedOn {
-                Text(planned.dayLabel(relativeTo: clock.today))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            // 已排期的行，日期标签自己就是排期入口；未排期的是一枚日历图标。
+            PlannedDayEntry(todo: todo)
         }
         .todoRowChrome()
         .contentShape(Rectangle())
+        .todoRowActions(todo, editing: $editing, delete: deleteTodo)
+        .swipeToDelete(deleteTodo)
+    }
+
+    private func deleteTodo() {
+        withAnimation { store.deleteTodo(todo) }
     }
 }
 #endif

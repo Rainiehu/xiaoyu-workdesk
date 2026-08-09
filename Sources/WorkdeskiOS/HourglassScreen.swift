@@ -162,6 +162,9 @@ private struct TimelineRow: View {
     let todo: TodoItem
     let today: Date
 
+    /// 正在就地改写这一行。三处的行都是这一套。
+    @State private var editing = TodoEditing()
+
     private var category: Category? { store.category(todo.categoryID) }
     private let tint: Color = .teal
 
@@ -171,11 +174,14 @@ private struct TimelineRow: View {
                 store.toggleTodo(todo)
             }
 
-            Text(todo.text)
+            TodoText(todo: todo, editing: $editing)
                 .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                .multilineTextAlignment(.leading)
 
             Spacer(minLength: 8)
+
+            // 排期入口只有图标，不带日期标签：这一行就躺在它计划日的分组底下，
+            // 那天写在组头上，行上再挂一遍就是一列重复的灰字。
+            PlannedDayEntry(todo: todo, showsDate: false)
 
             if let category {
                 CategoryTag(category: category, chip: false)
@@ -183,6 +189,12 @@ private struct TimelineRow: View {
         }
         .todoRowChrome()
         .contentShape(Rectangle())
+        .todoRowActions(todo, editing: $editing, delete: deleteTodo)
+        .swipeToDelete(deleteTodo)
+    }
+
+    private func deleteTodo() {
+        withAnimation { store.deleteTodo(todo) }
     }
 }
 #endif
