@@ -1,4 +1,5 @@
 import SwiftUI
+import WorkdeskCore
 
 /// 侧边栏底部的小卡片：两个工具今日的 token 用量，各自的限流窗口还剩多少。
 ///

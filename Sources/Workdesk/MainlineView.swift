@@ -1,4 +1,5 @@
 import SwiftUI
+import WorkdeskCore
 import UniformTypeIdentifiers
 
 /// tab 栏上的一项。沙漏是唯一不代表分类的那一项，永远排在首位。

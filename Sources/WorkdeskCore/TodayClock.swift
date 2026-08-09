@@ -2,6 +2,9 @@ import Foundation
 #if canImport(AppKit)
 import AppKit
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// 界面上「今天是哪天」的那一个答案。整条主线共用它 —— 轴的锚点、今天/昨天/明天的写法、
 /// 回车记事落在哪一天、排期面板上那个「今天」，说的永远是同一天。
@@ -17,10 +20,10 @@ import AppKit
 /// 这里只负责回答「现在是哪天」这一件事。
 @Observable
 @MainActor
-final class TodayClock {
-    private(set) var today: Date
+public final class TodayClock {
+    public private(set) var today: Date
 
-    init(now: Date = .now) {
+    public init(now: Date = .now) {
         today = now
     }
 
@@ -28,7 +31,7 @@ final class TodayClock {
     /// 「值变了」也就干干净净地只表示「过天了」。
     /// - Returns: 这一下是不是真的过天了。
     @discardableResult
-    func catchUp(to now: Date = .now) -> Bool {
+    public func catchUp(to now: Date = .now) -> Bool {
         guard !today.isSameDay(as: now) else { return false }
         today = now
         return true
@@ -41,7 +44,7 @@ final class TodayClock {
     /// - 窗口重新激活 —— 兜底。前两个都没送到时，至少回到它面前的那一刻是对的。
     ///
     /// 三个都只是「去问一次时钟」，问多了不要紧：日子没变时 `catchUp` 什么也不做。
-    func watch() async {
+    public func watch() async {
         await withTaskGroup(of: Void.self) { group in
             for name in Self.watchedNames {
                 group.addTask { @MainActor [weak self] in
@@ -66,6 +69,11 @@ final class TodayClock {
         var names: [Notification.Name] = [.NSCalendarDayChanged]
         #if canImport(AppKit)
         names.append(NSApplication.didBecomeActiveNotification)
+        #endif
+        #if canImport(UIKit)
+        // iOS 没有「睡醒」可听，但回到前台是同一件事的手机版：
+        // 锁屏过夜再打开，至少回到它面前的那一刻是对的。
+        names.append(UIApplication.didBecomeActiveNotification)
         #endif
         return names
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import WorkdeskCore
 
 enum SidebarSection: String, CaseIterable, Identifiable {
     case mainline = "主线"

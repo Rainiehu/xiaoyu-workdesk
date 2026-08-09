@@ -1,4 +1,5 @@
 import CoreTransferable
+import WorkdeskCore
 import UniformTypeIdentifiers
 
 /// 拖着一条待办走时递过去的东西：它的身份，仅此而已。

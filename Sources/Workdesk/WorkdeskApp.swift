@@ -1,4 +1,5 @@
 import SwiftUI
+import WorkdeskCore
 
 @main
 struct WorkdeskApp: App {

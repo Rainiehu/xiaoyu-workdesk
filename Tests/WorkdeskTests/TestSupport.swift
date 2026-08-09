@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 /// 一个确定的日子（当天零点）。断言因此不随「今天是几号」漂移。
 func day(_ year: Int, _ month: Int, _ day: Int) throws -> Date {
@@ -11,7 +11,7 @@ func day(_ year: Int, _ month: Int, _ day: Int) throws -> Date {
 /// 记一条待办并当场排上计划日。
 /// 分类的类型要写全名 —— 光写 `Category` 会撞上 Objective-C 运行时里的同名类型。
 @MainActor
-func schedule(_ text: String, in category: Workdesk.Category, on day: Date, _ store: Store) throws {
+func schedule(_ text: String, in category: WorkdeskCore.Category, on day: Date, _ store: Store) throws {
     store.addTodo(text, in: category.id)
     store.setPlannedDay(day, for: try #require(store.todos.last))
 }

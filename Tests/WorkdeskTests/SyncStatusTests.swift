@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Workdesk
+@testable import WorkdeskCore
 
 @Suite("同步记号的三态")
 struct SyncStatusTests {

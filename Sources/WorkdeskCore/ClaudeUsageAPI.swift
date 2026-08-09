@@ -5,6 +5,7 @@ import Foundation
 /// 这份数据**不在本地任何文件里** —— `~/.claude/projects/**.jsonl` 只记每次调用花了多少 token，
 /// 没有任何配额字段。`/usage` 显示的百分比来自 `/api/oauth/usage`，要带 OAuth token 调。
 /// 于是本地日志负责「用了多少」，这个接口负责「还剩多少」，两件事各有各的来源。
+#if os(macOS)
 enum ClaudeUsageAPI {
     private static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     /// 凭证在钥匙串里的条目名，由 Claude Code 自己写入。
@@ -79,3 +80,5 @@ enum ClaudeUsageAPI {
         return nil
     }
 }
+
+#endif

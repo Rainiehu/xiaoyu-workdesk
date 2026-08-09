@@ -2,7 +2,7 @@ import CloudKit
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 /// 收藏与同步的合缝处：本地增删记账、云端改动落地、账本落盘。
 /// 全程不碰真实的 CloudKit 服务 —— `CKRecord` 只是个数据结构，打包解包在本地就测得了。

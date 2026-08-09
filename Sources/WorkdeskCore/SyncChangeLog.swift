@@ -9,7 +9,7 @@ import Foundation
 ///
 /// 记录用「类型 + 名字」两个字符串指认，不指认具体的模型类型 ——
 /// 待办、分类与收藏走的就是同一本账。
-struct SyncChangeLog: Codable, Equatable {
+public struct SyncChangeLog: Codable, Equatable {
     /// 一条记录在账上的身份：CloudKit 的记录类型与记录名。
     struct Entry: Codable, Equatable, Hashable {
         var recordType: String
@@ -61,13 +61,14 @@ struct SyncChangeLog: Codable, Equatable {
         tombstones.removeAll { $0.recordName == recordName }
     }
 
-    var isEmpty: Bool { pendingSaves.isEmpty && tombstones.isEmpty }
+    public var isEmpty: Bool { pendingSaves.isEmpty && tombstones.isEmpty }
 
-    init() {}
+    public init() {}
+
 
     /// 手写解码只为读得进 #35 落盘的旧账本 —— 那时还没有 `editedAt`。
     /// 旧账缺时刻不碍事：真撞上冲突，顶多把那一笔当远古的改动，按后写胜让给云端。
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         pendingSaves = try container.decodeIfPresent([Entry].self, forKey: .pendingSaves) ?? []
         tombstones = try container.decodeIfPresent([Entry].self, forKey: .tombstones) ?? []

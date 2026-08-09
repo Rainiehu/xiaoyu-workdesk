@@ -5,10 +5,13 @@ import Security
 #if canImport(AppKit)
 import AppKit
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// 同步的持久性故障。日常是 `nil`，界面上什么也没有；
 /// 瞬时的网络抖动、一两次没送出去，都轮不到在这儿露面。
-enum SyncTrouble: Equatable {
+public enum SyncTrouble: Equatable {
     /// 这台 Mac 没有登录 iCloud。
     case noAccount
     /// iCloud 储存空间满了，推不上去。
@@ -18,7 +21,7 @@ enum SyncTrouble: Equatable {
 
     /// 点开记号看到的那句话。都以「本机的一切完好」收尾 —— 故障说的是云端那条路，
     /// 不是这台机器上的数据，这一点每次都值得说清。
-    var explanation: String {
+    public var explanation: String {
         switch self {
         case .noAccount:
             "这台 Mac 没有登录 iCloud，改动暂时只在本机。\n登录之后同步自己会接上，本机的一切完好。"
@@ -36,7 +39,7 @@ enum SyncTrouble: Equatable {
 /// 偏好与用量不在此列：那是每台机器自己的事，一个字节也不上云。
 @Observable
 @MainActor
-final class CloudSync: CKSyncEngineDelegate {
+public final class CloudSync: CKSyncEngineDelegate {
     private let store: Store
     private let directory: URL
     private var engine: CKSyncEngine?
@@ -50,22 +53,22 @@ final class CloudSync: CKSyncEngineDelegate {
     private var staleDays: Int?
     /// 上次与云端说上话的时刻。首次启动时从当下起算 —— 没有比这更早的可比对象。
     /// 记号悬停时说的「多久之前」就是它。
-    private(set) var lastSuccessAt: Date?
+    public private(set) var lastSuccessAt: Date?
 
     /// 同步这回事在这个构建里到底有没有开张。没带 iCloud 权限的构建里是 false ——
     /// 那时侧边栏不该挂一朵云出来说谎，app 就是一台单机 app。
-    private(set) var active = false
+    public private(set) var active = false
 
     /// 侧边栏那个记号看的就是它。`nil` 就什么记号也没有。
     /// 账号没了 > 配额满了 > 多日不通 —— 一次只说最要紧的一件。
-    var trouble: SyncTrouble? {
+    public var trouble: SyncTrouble? {
         if !accountAvailable { return .noAccount }
         if quotaBlocked { return .quotaExceeded }
         if let staleDays { return .stale(days: staleDays) }
         return nil
     }
 
-    init(store: Store, directory: URL) {
+    public init(store: Store, directory: URL) {
         self.store = store
         self.directory = directory
     }
@@ -75,6 +78,12 @@ final class CloudSync: CKSyncEngineDelegate {
     /// 这个构建有没有带 iCloud 权限。`swift run`、ad-hoc 或本机证书签的开发构建没有 ——
     /// 那时同步整个不启动，一声不吭：断没断网都轮不到它说话。
     nonisolated static var entitledToCloudKit: Bool {
+        #if os(iOS)
+        // iOS 上没有 SecTask 这套自查接口，而 iOS 的 app 必经 Xcode 签名，
+        // entitlement 由工程配置保证 —— 配漏了在首次 CKContainer 调用时就会当场暴露，
+        // 不会像 Mac 的 ad-hoc 构建那样「签名齐全、同步默不作声」。
+        return true
+        #else
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(task, "com.apple.developer.icloud-services" as CFString, nil)
         else { return false }
@@ -84,10 +93,11 @@ final class CloudSync: CKSyncEngineDelegate {
         // 同步却一声不吭，正是最难查的那种没坏之坏。
         if let wildcard = value as? String { return wildcard == "*" }
         return ((value as? [String]) ?? []).contains { $0 == "CloudKit" || $0 == "*" }
+        #endif
     }
 
     /// 点火。幂等 —— 窗口关了再开会再走一遍 `.task`，引擎不该跟着再起一台。
-    func start() {
+    public func start() {
         guard !started else { return }
         started = true
         guard Self.entitledToCloudKit else { return }
@@ -148,14 +158,17 @@ final class CloudSync: CKSyncEngineDelegate {
     /// 对拷验证时，靠的也是这一下（推送只会送达其中一个）。顺带重估一次故障记号。
     private func watchActivation() {
         #if canImport(AppKit)
+        let becameActive = NSApplication.didBecomeActiveNotification
+        #elseif canImport(UIKit)
+        let becameActive = UIApplication.didBecomeActiveNotification
+        #endif
         Task { @MainActor [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: NSApplication.didBecomeActiveNotification) {
+            for await _ in NotificationCenter.default.notifications(named: becameActive) {
                 guard let self else { return }
                 self.refreshStaleness()
                 try? await self.engine?.fetchChanges()
             }
         }
-        #endif
     }
 
     /// 「多日没同步成功」是随时间自己变真的 —— 没有事件会来说它，得自己隔一阵看一眼。
@@ -171,7 +184,7 @@ final class CloudSync: CKSyncEngineDelegate {
 
     // MARK: - 引擎的两问
 
-    func nextRecordZoneChangeBatch(
+    public func nextRecordZoneChangeBatch(
         _ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine
     ) async -> CKSyncEngine.RecordZoneChangeBatch? {
         let scope = context.options.scope
@@ -198,7 +211,7 @@ final class CloudSync: CKSyncEngineDelegate {
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: pending) { prepared[$0] }
     }
 
-    func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
+    public func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
         switch event {
         case .stateUpdate(let update):
             engineState = update.stateSerialization
@@ -217,10 +230,10 @@ final class CloudSync: CKSyncEngineDelegate {
                         store.applyRemoteTodo(item, modifiedAt: record.modificationDate)
                     }
                 case SyncSchema.categoryType:
-                    if let category = Workdesk.Category(record: record) {
+                    if let category = WorkdeskCore.Category(record: record) {
                         store.applyRemoteCategory(
                             category,
-                            position: Workdesk.Category.position(in: record),
+                            position: WorkdeskCore.Category.position(in: record),
                             modifiedAt: record.modificationDate
                         )
                     }
@@ -271,8 +284,8 @@ final class CloudSync: CKSyncEngineDelegate {
                 case SyncSchema.todoType:
                     if let item = TodoItem(record: record) { store.alignShadow(todo: item) }
                 case SyncSchema.categoryType:
-                    if let category = Workdesk.Category(record: record) {
-                        store.alignShadow(category: category, position: Workdesk.Category.position(in: record))
+                    if let category = WorkdeskCore.Category(record: record) {
+                        store.alignShadow(category: category, position: WorkdeskCore.Category.position(in: record))
                     }
                 default:
                     break
@@ -353,10 +366,10 @@ final class CloudSync: CKSyncEngineDelegate {
                     store.applyRemoteTodo(item, modifiedAt: server.modificationDate)
                 }
             case SyncSchema.categoryType:
-                if let category = Workdesk.Category(record: server) {
+                if let category = WorkdeskCore.Category(record: server) {
                     store.applyRemoteCategory(
                         category,
-                        position: Workdesk.Category.position(in: server),
+                        position: WorkdeskCore.Category.position(in: server),
                         modifiedAt: server.modificationDate
                     )
                 }

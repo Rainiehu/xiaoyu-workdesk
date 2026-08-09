@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import Workdesk
+@testable import WorkdeskCore
 
 @MainActor
 @Suite("沙漏视图的拖拽改期")
