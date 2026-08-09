@@ -15,6 +15,7 @@ enum MainlineTab: Hashable {
 /// 三种横向手势挤在同一屏谁都接不稳 —— 一个手势只干一件事。
 struct MainlineScreen: View {
     @Environment(Store.self) private var store
+    @Environment(CloudSync.self) private var sync
     /// 打开主线默认落在沙漏视图上，不落在任何分类里。
     @State private var selection: MainlineTab = .hourglass
     /// 新建分类的名字面板开着。iOS 上是一个带输入框的 alert —— 起名是一句话的事。
@@ -37,7 +38,15 @@ struct MainlineScreen: View {
             if store.categories.isEmpty {
                 onboarding
             } else {
-                TabStrip(selected: selected, select: { selection = $0 }, newCategory: { naming = true })
+                HStack(spacing: 0) {
+                    TabStrip(selected: selected, select: { selection = $0 }, newCategory: { naming = true })
+                    // 同步记号钉在 tab 条右端、可滚动区外面 —— 分类再多、横着滚起来，
+                    // 它也留在原处。只在同步真开着的构建里挂：单机构建不该挂一朵云说谎。
+                    if sync.active {
+                        SyncMark()
+                            .padding(.trailing, 10)
+                    }
+                }
                 Divider()
                 content
             }

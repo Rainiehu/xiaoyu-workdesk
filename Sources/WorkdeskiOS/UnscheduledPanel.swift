@@ -86,6 +86,11 @@ private struct UnscheduledRow: View {
         .todoRowChrome()
         .contentShape(Rectangle())
         .todoRowActions(todo, editing: $editing, delete: deleteTodo)
+        // 抓的是同一样东西 —— 拖出面板落到轴上露着的那条主列上也是排期，
+        // 只是面板盖着轴，这条路窄；主要路径是行上的排期入口。
+        .draggable(DraggedTodo(id: todo.id)) {
+            TodoDragPreview(text: todo.text, tint: tint)
+        }
         .swipeToDelete(deleteTodo)
     }
 

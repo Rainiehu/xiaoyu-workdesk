@@ -124,8 +124,12 @@ struct HourglassScreen: View {
 /// 轴上的一天：一个日期头，下面是这天的待办。今天这一组用强调样式，它是锚点；
 /// 别的日子一律同一副模样 —— 与 Mac 同一套。
 private struct DayGroup: View {
+    @Environment(Store.self) private var store
     let day: TimelineDay
     let today: Date
+
+    /// 有条目正悬在这一组上方。松手落在哪一组，此刻亮的就是哪一组。
+    @State private var targeted = false
 
     private var isToday: Bool { day.day.isSameDay(as: today) }
 
@@ -149,6 +153,13 @@ private struct DayGroup: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(isToday ? AnyShapeStyle(.teal.opacity(0.08)) : AnyShapeStyle(.clear))
         )
+        // 落点指示画在外圈：整组连同日期头一起框起来，底色留给今天那个锚点。
+        .dropTargetStroke(targeted, cornerRadius: 12)
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .dropDestination(for: DraggedTodo.self) { dropped, _ in
+            guard let dropped = dropped.first else { return false }
+            return store.reschedule(dropped.id, to: day.day)
+        } isTargeted: { targeted = $0 }
     }
 
     /// 日期头。今天的写得大些、重些、是青的 —— 强调它靠字本身。
@@ -197,6 +208,10 @@ private struct TimelineRow: View {
         .todoRowChrome()
         .contentShape(Rectangle())
         .todoRowActions(todo, editing: $editing, delete: deleteTodo)
+        // 整行都拖得动，包括已完成的 —— 做完的事也照样可以改它排在哪天。
+        .draggable(DraggedTodo(id: todo.id)) {
+            TodoDragPreview(text: todo.text, tint: tint)
+        }
         .swipeToDelete(deleteTodo)
     }
 

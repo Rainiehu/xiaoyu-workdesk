@@ -74,6 +74,34 @@ extension View {
     }
 }
 
+/// 拖起来时手上跟着的那一小块：就是这条待办的正文。与 Mac 同一副 ——
+/// 整行连着底色一起拖会盖住下面的落点，只带一句字轻便得多。
+struct TodoDragPreview: View {
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        Text(text)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius).fill(tint.opacity(0.15))
+            )
+    }
+}
+
+extension View {
+    /// 落点指示：青色描边。「松手会落在这儿」在轴上、tab 条上、主列行上是同一句话，
+    /// 与 Mac 同一个颜色、同一个说法。
+    func dropTargetStroke(_ targeted: Bool, cornerRadius: CGFloat = TodoRowLayout.cornerRadius) -> some View {
+        overlay(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2)
+        )
+        .animation(.easeOut(duration: 0.12), value: targeted)
+    }
+}
+
 /// 一行待办正在改写时的那点状态。与 Mac 同一副：草稿先装上原文，同一下才翻成改写中。
 struct TodoEditing {
     private(set) var active = false

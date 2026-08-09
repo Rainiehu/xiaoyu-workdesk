@@ -70,6 +70,9 @@ private struct FinishedRow: View {
         .todoRowChrome()
         .contentShape(Rectangle())
         .todoRowActions(todo, editing: $editing, delete: deleteTodo)
+        .draggable(DraggedTodo(id: todo.id)) {
+            TodoDragPreview(text: todo.text, tint: tint)
+        }
         .swipeToDelete(deleteTodo)
     }
 
