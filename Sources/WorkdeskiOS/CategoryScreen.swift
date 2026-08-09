@@ -14,6 +14,9 @@ struct CategoryScreen: View {
     @State private var draft = ""
     @FocusState private var inputFocused: Bool
 
+    /// 已完成面板拉开着。
+    @State private var finishedOpen = false
+
     var body: some View {
         let columns = store.columns(in: category.id)
 
@@ -25,6 +28,11 @@ struct CategoryScreen: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { input }
+        // 已完成是分类屏的副列，从右缘拉出 —— 与沙漏屏的未排期同一副把手。
+        // 一件事都没有时不挂把手：那时没有「已完成」可谈，整屏是一段引导。
+        .pullOutPanel(enabled: !columns.isEmpty, isOpen: $finishedOpen) {
+            FinishedPanel(category: category)
+        }
     }
 
     private func list(_ todos: [TodoItem]) -> some View {

@@ -14,6 +14,9 @@ struct HourglassScreen: View {
     @State private var draft = ""
     @FocusState private var inputFocused: Bool
 
+    /// 未排期面板拉开着。
+    @State private var unscheduledOpen = false
+
     /// 今天那一组在轴内容里的纵向中点，和轴内容的总高 —— 「按需垫高」的量具，与 Mac 同一套。
     @State private var todayCenterY: CGFloat?
     @State private var contentHeight: CGFloat?
@@ -31,6 +34,10 @@ struct HourglassScreen: View {
                 if let category = store.recordingCategory {
                     input(category: category, today: today)
                 }
+            }
+            // 未排期是沙漏屏的副列，从右缘拉出 —— 轴答「排在哪天」，它答「还有什么没安排」。
+            .pullOutPanel(isOpen: $unscheduledOpen) {
+                UnscheduledPanel()
             }
     }
 
