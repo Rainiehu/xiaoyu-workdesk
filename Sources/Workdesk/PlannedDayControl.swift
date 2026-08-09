@@ -3,7 +3,8 @@ import SwiftUI
 /// 一条待办的计划日入口。排期与改期是同一件事：不论排没排期、完没完成，悬停时都浮出
 /// 同一个日历图标，点开同一个面板 —— 入口不随行的状态换模样，看见图标就知道这一下是干什么的。
 /// 四处的行（分类视图两列、轴上、未排期列）都是这一个入口。
-/// 已排期的行另有一个日期标签，但它只是标签，和完成行上的完成日一样安静，不接点击。
+/// 已排期的行另有一个日期标签，但这一格一次只说一样：静止时是安静的标签，
+/// 悬停时它让位给图标 —— 图标点开的面板说的就是这一天，两个并排就是重复。
 ///
 /// 计划日在过去还是将来，日期标签的写法一模一样：不变色、不加徽标 ——
 /// 过期的记号只有一处，在那一行的勾圈上（描成琥珀），不在这儿再说一遍。见 ADR-0004。
@@ -12,23 +13,26 @@ struct PlannedDayControl: View {
     let todo: TodoItem
     /// 整行是不是正被悬停 —— 入口只在悬停时露面，静止时行上只有日期这个安静的标签。
     let rowHovering: Bool
-    /// 常驻的日期标签画不画。轴上不画（那天写在组头上，行上再挂一遍是重复的灰字），
+    /// 静止时的日期标签画不画。轴上不画（那天写在组头上，行上再挂一遍是重复的灰字），
     /// 分类视图右列不画（那格常驻的是完成日，由所在那列自己画）—— 两处只要悬浮的图标。
     var showsDate: Bool = true
 
     @State private var presented = false
 
     var body: some View {
-        if showsDate, let planned = todo.plannedOn {
+        if showsDate, !entryVisible, let planned = todo.plannedOn {
             Text(planned.dayLabel(relativeTo: clock.today))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        // 面板开着时把图标留住：鼠标移去面板上就不算悬停这一行了，入口不能跟着消失。
-        if rowHovering || presented {
+        if entryVisible {
             entry
         }
     }
+
+    /// 面板开着时把图标留住：鼠标移去面板上就不算悬停这一行了，入口不能跟着消失
+    /// （日期标签也跟着继续让位，不挤回来）。
+    private var entryVisible: Bool { rowHovering || presented }
 
     private var entry: some View {
         Button { presented = true } label: {
