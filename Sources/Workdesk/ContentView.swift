@@ -34,10 +34,15 @@ struct ContentView: View {
                 .scrollContentBackground(.hidden)
 
                 Spacer(minLength: 0)
-                if let trouble = sync.trouble {
-                    SyncTroubleMark(trouble: trouble)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 4)
+                // 常驻的同步记号。只在同步真开着的构建里挂 —— 单机构建不该挂一朵云说谎。
+                if sync.active {
+                    SyncStatusMark(status: SyncStatus(
+                        trouble: sync.trouble,
+                        sending: !store.syncLog.isEmpty,
+                        lastSuccessAt: sync.lastSuccessAt
+                    ))
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 4)
                 }
                 UsageCard()
                     .padding(10)
@@ -62,34 +67,3 @@ struct ContentView: View {
     }
 }
 
-/// 侧边栏底部那个低调的同步记号。日常它不存在；只在持久性故障时出现 ——
-/// 与过期琥珀同一副分寸：不冒泡、不弹窗，就一行灰色小字，点开才见原因。
-/// 连颜色都不给 —— 它是个可查的事实，不是一个要人处理的警报。
-struct SyncTroubleMark: View {
-    let trouble: SyncTrouble
-    @State private var showingReason = false
-
-    var body: some View {
-        Button {
-            showingReason.toggle()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "icloud.slash")
-                Text("同步停着")
-                Spacer(minLength: 0)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("同步遇到了点事，点开看看")
-        .popover(isPresented: $showingReason, arrowEdge: .trailing) {
-            Text(trouble.explanation)
-                .font(.callout)
-                .lineSpacing(3)
-                .padding(16)
-                .frame(width: 260, alignment: .leading)
-        }
-    }
-}
