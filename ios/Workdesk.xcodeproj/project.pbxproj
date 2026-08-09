@@ -1,0 +1,235 @@
+// !$*UTF8*$!
+// iOS 的最小工程：真正的代码全在仓库根的 SwiftPM 包里（WorkdeskCore + WorkdeskiOS），
+// 这儿只有一个 @main 薄壳和签名配置 —— 加减 UI 文件不必回来改这份文件。
+// 与 Resources/provisioning 的那份一样是手写的，见 ADR-0006。
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		BB0000000000000000000101 /* WorkdeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* WorkdeskApp.swift */; };
+		BB0000000000000000000102 /* WorkdeskiOS in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000000000000000000901 /* WorkdeskiOS */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		BB0000000000000000000001 /* WorkdeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkdeskApp.swift; sourceTree = "<group>"; };
+		BB0000000000000000000002 /* WorkdeskiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WorkdeskiOS.entitlements; sourceTree = "<group>"; };
+		BB0000000000000000000003 /* Workdesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Workdesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		BB0000000000000000000201 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0000000000000000000102 /* WorkdeskiOS in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		BB0000000000000000000301 = {
+			isa = PBXGroup;
+			children = (
+				BB0000000000000000000303 /* App */,
+				BB0000000000000000000002 /* WorkdeskiOS.entitlements */,
+				BB0000000000000000000302 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000302 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				BB0000000000000000000003 /* Workdesk.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000303 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				BB0000000000000000000001 /* WorkdeskApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		BB0000000000000000000401 /* WorkdeskApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BB0000000000000000000601 /* Build configuration list for PBXNativeTarget "WorkdeskApp" */;
+			buildPhases = (
+				BB0000000000000000000501 /* Sources */,
+				BB0000000000000000000201 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WorkdeskApp;
+			packageProductDependencies = (
+				BB0000000000000000000901 /* WorkdeskiOS */,
+			);
+			productName = WorkdeskApp;
+			productReference = BB0000000000000000000003 /* Workdesk.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BB0000000000000000000701 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					BB0000000000000000000401 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = BB0000000000000000000602 /* Build configuration list for PBXProject "Workdesk" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = BB0000000000000000000301;
+			packageReferences = (
+				BB0000000000000000000801 /* XCLocalSwiftPackageReference ".." */,
+			);
+			productRefGroup = BB0000000000000000000302 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				BB0000000000000000000401 /* WorkdeskApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BB0000000000000000000501 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0000000000000000000101 /* WorkdeskApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		BB0000000000000000000811 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		BB0000000000000000000812 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		BB0000000000000000000821 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = WorkdeskiOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C5LAP7CQG9;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "案头";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = cc.huxiaoyu.workdesk.ios;
+				PRODUCT_NAME = Workdesk;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		BB0000000000000000000822 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = WorkdeskiOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C5LAP7CQG9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "案头";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = cc.huxiaoyu.workdesk.ios;
+				PRODUCT_NAME = Workdesk;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BB0000000000000000000601 /* Build configuration list for PBXNativeTarget "WorkdeskApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0000000000000000000821 /* Debug */,
+				BB0000000000000000000822 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BB0000000000000000000602 /* Build configuration list for PBXProject "Workdesk" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0000000000000000000811 /* Debug */,
+				BB0000000000000000000812 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		BB0000000000000000000801 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BB0000000000000000000901 /* WorkdeskiOS */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WorkdeskiOS;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = BB0000000000000000000701 /* Project object */;
+}
