@@ -67,6 +67,8 @@ struct CategoryTabChip: View {
     /// 刚刚有一次删除被拦下时，里头还剩多少条待办。
     @State private var refusedTodoCount = 0
     @State private var refusedDeletion = false
+    /// 有一条待办正悬在这个 tab 上方。松手它就归到这个分类。
+    @State private var targeted = false
 
     var body: some View {
         Button(action: select) {
@@ -76,8 +78,17 @@ struct CategoryTabChip: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .tabChip(category.color.tint, isSelected: isSelected)
+                // 落点指示与轴上、主列行上那圈同一句话：「松手会落在这儿」。
+                .overlay(Capsule().strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2))
         }
         .buttonStyle(.plain)
+        // 手势版的「移到分类」。只改归属：三个日子与完成状态都不变。
+        // 沙漏 tab 不接落点：它不代表任何分类，没有「归到沙漏」这回事。
+        .dropDestination(for: DraggedTodo.self) { dropped, _ in
+            guard let dropped = dropped.first else { return false }
+            return store.moveTodo(dropped.id, to: category.id)
+        } isTargeted: { targeted = $0 }
+        .animation(.easeOut(duration: 0.12), value: targeted)
         .contextMenu {
             Button("重命名…") {
                 draftName = category.name

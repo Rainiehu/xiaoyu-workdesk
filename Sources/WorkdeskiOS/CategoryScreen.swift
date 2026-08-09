@@ -100,6 +100,8 @@ private struct CategoryRow: View {
     let tint: Color
 
     @State private var editing = TodoEditing()
+    /// 有另一行正悬在这一行上方。松手它就落到这一行的位置上。
+    @State private var targeted = false
 
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
@@ -115,8 +117,17 @@ private struct CategoryRow: View {
             PlannedDayEntry(todo: todo)
         }
         .todoRowChrome()
+        .dropTargetStroke(targeted)
         .contentShape(Rectangle())
         .todoRowActions(todo, editing: $editing, delete: deleteTodo)
+        .draggable(DraggedTodo(id: todo.id)) {
+            TodoDragPreview(text: todo.text, tint: tint)
+        }
+        // 主列的顺序归使用者自己拖：拖一行放到这一行上，它就落到这个位置，见 ADR-0002。
+        .dropDestination(for: DraggedTodo.self) { dropped, _ in
+            guard let dropped = dropped.first else { return false }
+            return store.reorderTodo(dropped.id, onto: todo.id)
+        } isTargeted: { targeted = $0 }
         .swipeToDelete(deleteTodo)
     }
 

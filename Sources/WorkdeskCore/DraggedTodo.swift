@@ -1,5 +1,4 @@
 import CoreTransferable
-import WorkdeskCore
 import UniformTypeIdentifiers
 
 /// 拖着一条待办走时递过去的东西：它的身份，仅此而已。
@@ -11,10 +10,14 @@ import UniformTypeIdentifiers
 ///
 /// 类型是自家的，于是从别处拖来的文字、链接一律接不住；反过来，从这儿拖出去的东西
 /// 别的应用也接不住 —— 这些手势只在这个应用里成立。
-struct DraggedTodo: Codable, Transferable {
-    var id: TodoItem.ID
+public struct DraggedTodo: Codable, Transferable {
+    public var id: TodoItem.ID
 
-    static var transferRepresentation: some TransferRepresentation {
+    public init(id: TodoItem.ID) {
+        self.id = id
+    }
+
+    public static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .workdeskTodo)
     }
 }
@@ -22,5 +25,5 @@ struct DraggedTodo: Codable, Transferable {
 extension UTType {
     /// 只有这个应用自己拖出来的待办认得这个类型。与 `build.sh` 里 Info.plist 的
     /// `UTExportedTypeDeclarations` 是同一个标识符，两边要一起改。
-    static let workdeskTodo = UTType(exportedAs: "cc.huxiaoyu.workdesk.todo")
+    public static let workdeskTodo = UTType(exportedAs: "cc.huxiaoyu.workdesk.todo")
 }
