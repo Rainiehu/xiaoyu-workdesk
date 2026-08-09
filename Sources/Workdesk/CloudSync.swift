@@ -73,7 +73,12 @@ final class CloudSync: CKSyncEngineDelegate {
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(task, "com.apple.developer.icloud-services" as CFString, nil)
         else { return false }
-        return ((value as? [String]) ?? []).contains("CloudKit")
+        // 自己写的 entitlements 是 ["CloudKit"] 这样的数组；从 profile 原样提取的
+        // 却可能是通配的 "*"（单个字符串）—— Xcode 签发的 profile 就这么写。
+        // 两种写法说的都是「有 iCloud 的门票」，都认；认漏了的下场是签名齐全、
+        // 同步却一声不吭，正是最难查的那种没坏之坏。
+        if let wildcard = value as? String { return wildcard == "*" }
+        return ((value as? [String]) ?? []).contains { $0 == "CloudKit" || $0 == "*" }
     }
 
     /// 点火。幂等 —— 窗口关了再开会再走一遍 `.task`，引擎不该跟着再起一台。
