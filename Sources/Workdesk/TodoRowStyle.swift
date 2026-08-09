@@ -65,7 +65,7 @@ extension Color {
     /// 撞了色就分不清「这行属于琥珀色的分类」和「这行过期了」，所以压灰压暗一档，弱提醒不抢戏。
     /// 浅色外观深一档、深色外观浅一档，与分类色板同一条纪律。
     static let overdueAmber = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor(rgb: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? 0xD9A558 : 0xC2801F)
+        NSColor(rgb: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? OverdueAmber.dark : OverdueAmber.light)
     })
 }
 
