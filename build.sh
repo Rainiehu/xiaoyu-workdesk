@@ -89,6 +89,20 @@ if [ -f "$PROFILE" ] && [ -n "$DEV_HASH" ]; then
     # 不会签出一个 profile 不认、系统于是拒绝启动的 app。
     ENT="build/entitlements.plist"
     if security cms -D -i "$PROFILE" 2>/dev/null | plutil -extract Entitlements xml1 -o "$ENT" - 2>/dev/null; then
+        # profile 里写的是「允许什么」的模式，签名要的是「就是什么」的具体值。
+        # 模式原样签进去，CloudKit 启动时会当场抛 malformed entitlements 把 app 掀翻：
+        # icloud-services 的 "*" 落成 ["CloudKit"]；环境落定 Development ——
+        # 只有它会随写随建 schema，Production 里没部署过的记录类型一保存就无声失败。
+        # 哪天真要换环境也不迁移：本地永远是事实来源，云端换成空的就整体重传。
+        # kvstore 那条是没用上的通配模式，直接去掉。
+        /usr/libexec/PlistBuddy \
+            -c "Delete :com.apple.developer.icloud-services" \
+            -c "Add :com.apple.developer.icloud-services array" \
+            -c "Add :com.apple.developer.icloud-services:0 string CloudKit" \
+            -c "Delete :com.apple.developer.icloud-container-environment" \
+            -c "Add :com.apple.developer.icloud-container-environment string Development" \
+            "$ENT"
+        /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.ubiquity-kvstore-identifier" "$ENT" 2>/dev/null || true
         cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
         if timed_sign --force --entitlements "$ENT" -s "$DEV_HASH" "$APP"; then
             signed=true
