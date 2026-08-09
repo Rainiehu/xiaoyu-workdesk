@@ -18,3 +18,4 @@ build/
 Resources/provisioning/Workdesk.provisionprofile
 Resources/provisioning/Provisioning.xcodeproj/project.xcworkspace/
 Resources/provisioning/Provisioning.xcodeproj/xcuserdata/
+.claude/worktrees/
