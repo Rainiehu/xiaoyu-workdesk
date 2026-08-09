@@ -89,7 +89,10 @@ struct Pen {
 }
 
 /// 画一个尺寸的图标。所有几何都按 1024 的比例算，于是每个尺寸都是矢量重绘，不是缩放。
-func drawIcon(size: Int) -> Data {
+/// - Parameter fullBleed: iOS 要的全出血方形 —— 纸底铺满整个画布（圆角由系统的遮罩切），
+///   图案按 1024/824 放大，好让沙漏在两个平台上占同样的视觉比例。macOS 传 false：
+///   1024 画布里留白的超椭圆纸片。
+func drawIcon(size: Int, fullBleed: Bool = false) -> Data {
     let s = CGFloat(size)
     let k = s / 1024  // 比例尺
 
@@ -107,9 +110,19 @@ func drawIcon(size: Int) -> Data {
     // 黑白手绘钢笔线稿：暖白的纸底，墨色的线。
     let paper = CGColor(red: 0.992, green: 0.988, blue: 0.976, alpha: 1)
     let ink = CGColor(red: 0.106, green: 0.102, blue: 0.094, alpha: 1)
-    ctx.addPath(squircle(rect: plate))
-    ctx.setFillColor(paper)
-    ctx.fillPath()
+    if fullBleed {
+        ctx.setFillColor(paper)
+        ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
+        // 图案放大到原来纸片的比例：以画布中心为轴，824 的纸片撑满 1024。
+        let scale = 1024.0 / 824.0
+        ctx.translateBy(x: s / 2, y: s / 2)
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.translateBy(x: -s / 2, y: -s / 2)
+    } else {
+        ctx.addPath(squircle(rect: plate))
+        ctx.setFillColor(paper)
+        ctx.fillPath()
+    }
 
     ctx.setStrokeColor(ink)
     ctx.setFillColor(ink)
@@ -138,15 +151,23 @@ func drawIcon(size: Int) -> Data {
 }
 
 let outDir = CommandLine.arguments[1]
-// .icns 要的十张：五个逻辑尺寸各配一张 @2x。
-let sizes: [(Int, String)] = [
-    (16, "icon_16x16.png"), (32, "icon_16x16@2x.png"),
-    (32, "icon_32x32.png"), (64, "icon_32x32@2x.png"),
-    (128, "icon_128x128.png"), (256, "icon_128x128@2x.png"),
-    (256, "icon_256x256.png"), (512, "icon_256x256@2x.png"),
-    (512, "icon_512x512.png"), (1024, "icon_512x512@2x.png"),
-]
-for (size, name) in sizes {
-    try drawIcon(size: size).write(to: URL(fileURLWithPath: outDir).appendingPathComponent(name))
+
+// `--ios` 只出一张 1024 的全出血方形 —— iOS 的资产目录就要这一张，圆角系统自己切。
+if CommandLine.arguments.contains("--ios") {
+    try drawIcon(size: 1024, fullBleed: true)
+        .write(to: URL(fileURLWithPath: outDir).appendingPathComponent("AppIcon-1024.png"))
+    print("✓ 1 张（iOS 全出血）")
+} else {
+    // .icns 要的十张：五个逻辑尺寸各配一张 @2x。
+    let sizes: [(Int, String)] = [
+        (16, "icon_16x16.png"), (32, "icon_16x16@2x.png"),
+        (32, "icon_32x32.png"), (64, "icon_32x32@2x.png"),
+        (128, "icon_128x128.png"), (256, "icon_128x128@2x.png"),
+        (256, "icon_256x256.png"), (512, "icon_256x256@2x.png"),
+        (512, "icon_512x512.png"), (1024, "icon_512x512@2x.png"),
+    ]
+    for (size, name) in sizes {
+        try drawIcon(size: size).write(to: URL(fileURLWithPath: outDir).appendingPathComponent(name))
+    }
+    print("✓ \(sizes.count) 张")
 }
-print("✓ \(sizes.count) 张")
