@@ -137,7 +137,12 @@ private struct DayGroup: View {
         VStack(alignment: .leading, spacing: 4) {
             header
             ForEach(day.todos) { todo in
-                TimelineRow(todo: todo, today: today)
+                // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
+                if todo.isDeleted {
+                    DeletedTodoRow(todo: todo)
+                } else {
+                    TimelineRow(todo: todo, today: today)
+                }
             }
             if isToday && day.todos.isEmpty {
                 Text("今天还没有安排")

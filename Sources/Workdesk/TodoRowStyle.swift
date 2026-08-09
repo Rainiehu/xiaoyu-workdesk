@@ -71,8 +71,7 @@ extension Color {
 
 /// 悬停时浮出的删除。三处摆在同一个位置上：行尾那个常驻元素的左边 ——
 /// 轴上它靠着分类 tag，另外两处它自己就是最右。
-///
-/// 删除没有撤销、没有回收站，所以它只在悬停时露面，静止时一点痕迹也不留。
+/// 删完那一行原地变成占位（`DeletedTodoRow`），几秒内点撤销就回来。
 struct TodoDeleteButton: View {
     let delete: () -> Void
 
@@ -83,6 +82,36 @@ struct TodoDeleteButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .help("删除")
+    }
+}
+
+/// 原位占位：刚删掉的待办留在它原来的位置上，撤销窗口开着的那几秒里可以点回来 ——
+/// 占位跟着死者的原位走，一行待办活在几处（轴、分类视图、未排期列），占位就在几处，
+/// 见 ADR-0007。窗口一关它自己塌掉（`Store` 把记录搬进池子，行就不在列表里了）。
+///
+/// 字号与所在列同步：外面罩什么字号，正文和「撤销」就是什么字号 —— 与 `TodoText` 同一条规矩。
+struct DeletedTodoRow: View {
+    @Environment(Store.self) private var store
+    let todo: TodoItem
+
+    var body: some View {
+        HStack(spacing: TodoRowLayout.spacing) {
+            Text("已删除「\(todo.text)」")
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button("撤销") { withAnimation { store.undeleteTodo(todo.id) } }
+                .buttonStyle(.plain)
+                .fontWeight(.semibold)
+                .foregroundStyle(.teal)
+                .help("撤销删除")
+        }
+        .padding(.horizontal, TodoRowLayout.horizontalInset)
+        .padding(.vertical, TodoRowLayout.verticalInset)
+        .background(
+            RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius)
+                .fill(.quaternary.opacity(0.35))
+        )
     }
 }
 

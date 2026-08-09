@@ -33,6 +33,7 @@ extension FavoriteItem {
         record["urlString"] = urlString
         record["note"] = note
         record["createdAt"] = createdAt
+        record["deletedAt"] = deletedAt
         return record
     }
 
@@ -47,7 +48,8 @@ extension FavoriteItem {
             title: title,
             urlString: record["urlString"] as? String,
             note: record["note"] as? String,
-            createdAt: record["createdAt"] as? Date ?? .now
+            createdAt: record["createdAt"] as? Date ?? .now,
+            deletedAt: record["deletedAt"] as? Date
         )
     }
 }
@@ -78,6 +80,8 @@ extension TodoItem {
         record["completedAt"] = completedAt
         record["plannedOn"] = plannedOn
         record["order"] = order
+        // 删除是打记号，不是抹掉：删除态的记录照常保存，靠这个字段说自己删了（ADR-0007）。
+        record["deletedAt"] = deletedAt
         return record
     }
 
@@ -97,7 +101,8 @@ extension TodoItem {
             createdAt: record["createdAt"] as? Date ?? .now,
             completedAt: record["completedAt"] as? Date,
             plannedOn: record["plannedOn"] as? Date,
-            order: record["order"] as? Int
+            order: record["order"] as? Int,
+            deletedAt: record["deletedAt"] as? Date
         )
     }
 }
@@ -121,6 +126,7 @@ extension Category {
         record["name"] = name
         record["color"] = color.rawValue
         record["position"] = position
+        record["deletedAt"] = deletedAt
         return record
     }
 
@@ -132,7 +138,7 @@ extension Category {
               let id = UUID(uuidString: record.recordID.recordName),
               let name = record["name"] as? String else { return nil }
         let color = (record["color"] as? String).flatMap(CategoryColor.init(rawValue:)) ?? .slate
-        self.init(id: id, name: name, color: color)
+        self.init(id: id, name: name, color: color, deletedAt: record["deletedAt"] as? Date)
     }
 
     /// 记录里写的位置。没写就排到最后 —— 一个来历不明的位置不值得插队。

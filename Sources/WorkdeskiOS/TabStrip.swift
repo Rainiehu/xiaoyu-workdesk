@@ -17,8 +17,14 @@ struct TabStrip: View {
                 // 一道细竖线把沙漏和分类分开：它是唯一不代表分类的一项，这里就说明白。
                 Divider().frame(height: 16)
                 ForEach(store.categories) { category in
-                    CategoryTabChip(category: category, isSelected: selected == .category(category.id)) {
-                        select(.category(category.id))
+                    // 删除态的 tab 是原位占位胶囊：撤销窗口开着的那几秒它还占着位置，
+                    // 别的 tab 不合拢，见 ADR-0007。
+                    if category.isDeleted {
+                        DeletedCategoryChip(id: category.id)
+                    } else {
+                        CategoryTabChip(category: category, isSelected: selected == .category(category.id)) {
+                            select(.category(category.id))
+                        }
                     }
                 }
                 Button(action: newCategory) {
@@ -126,6 +132,34 @@ struct CategoryTabChip: View {
             refusedTodoCount = todoCount
             refusedDeletion = true
         }
+    }
+}
+
+/// 原位占位胶囊：刚删掉的分类在 tab 条原来的位置上留下的口子，撤销窗口开着的
+/// 那几秒里点一下就回来 —— 与 Mac 的同名占位同一副，见 ADR-0007。
+/// 整个胶囊就是撤销按钮：占位上没有第二件可做的事。
+private struct DeletedCategoryChip: View {
+    @Environment(Store.self) private var store
+    let id: Category.ID
+
+    var body: some View {
+        Button {
+            store.undeleteCategory(id)
+        } label: {
+            HStack(spacing: 6) {
+                Text("已删除")
+                    .foregroundStyle(.tertiary)
+                Text("撤销")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.teal)
+            }
+            .font(.callout)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(.quaternary.opacity(0.4)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 

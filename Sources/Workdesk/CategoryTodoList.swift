@@ -78,7 +78,12 @@ struct CategoryTodoList: View {
         ScrollView {
             LazyVStack(spacing: 2) {
                 ForEach(todos) { todo in
-                    TodoRow(todo: todo, tint: category.color.tint)
+                    // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
+                    if todo.isDeleted {
+                        DeletedTodoRow(todo: todo)
+                    } else {
+                        TodoRow(todo: todo, tint: category.color.tint)
+                    }
                 }
             }
             .padding(.horizontal, 20)

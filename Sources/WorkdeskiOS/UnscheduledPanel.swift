@@ -51,7 +51,13 @@ private struct UnscheduledGroupView: View {
                 .padding(.leading, TodoRowLayout.horizontalInset)
                 .padding(.bottom, 2)
             ForEach(group.todos) { todo in
-                UnscheduledRow(todo: todo, tint: group.category.color.tint)
+                // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
+                if todo.isDeleted {
+                    DeletedTodoRow(todo: todo)
+                        .font(.callout)
+                } else {
+                    UnscheduledRow(todo: todo, tint: group.category.color.tint)
+                }
             }
         }
     }

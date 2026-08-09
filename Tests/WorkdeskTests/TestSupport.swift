@@ -16,6 +16,12 @@ func schedule(_ text: String, in category: WorkdeskCore.Category, on day: Date, 
     store.setPlannedDay(day, for: try #require(store.todos.last))
 }
 
+/// 把还开着的撤销窗口全部关掉 —— 测试不真等那几秒，直接把删除态送进池子。
+@MainActor
+func closeUndoWindows(_ store: Store) {
+    for entry in store.pendingUndos { store.expireUndoWindow(entry.id) }
+}
+
 /// 建一个空的临时目录跑 `body`，跑完删掉。测试因此不碰使用者真实的 Application Support。
 func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {
     let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)

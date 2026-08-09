@@ -43,7 +43,12 @@ struct FavoritesView: View {
 
                 LazyVStack(spacing: 10) {
                     ForEach(store.favorites.reversed()) { item in
-                        FavoriteCard(item: item)
+                        // 删除态的卡是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
+                        if item.isDeleted {
+                            DeletedFavoriteCard(item: item)
+                        } else {
+                            FavoriteCard(item: item)
+                        }
                     }
                 }
             }
@@ -52,6 +57,33 @@ struct FavoritesView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+/// 原位占位：刚删掉的收藏在流里原来的位置上留下的口子，撤销窗口开着的那几秒里
+/// 点撤销就回来 —— 与待办行、分类 tab 的占位同一副分寸，见 ADR-0007。
+/// 卡片的形状留着（同宽同圆角），里头只剩一句话和撤销：占位说明这儿少了什么，不复述内容。
+private struct DeletedFavoriteCard: View {
+    @Environment(Store.self) private var store
+    let item: FavoriteItem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("已删除「\(item.title)」")
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer()
+            Button("撤销") { withAnimation { store.undeleteFavorite(item.id) } }
+                .buttonStyle(.plain)
+                .fontWeight(.semibold)
+                .foregroundStyle(.teal)
+                .help("撤销删除")
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.quaternary.opacity(0.35))
+        )
     }
 }
 

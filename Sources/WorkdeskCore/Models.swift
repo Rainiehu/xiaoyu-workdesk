@@ -5,12 +5,18 @@ public struct Category: Identifiable, Codable, Equatable {
     public var id = UUID()
     public var name: String
     public var color: CategoryColor
+    /// 删除时刻。删除是打记号，不是抹掉：有值就是删除态，从一切界面消失，记录永远留着。
+    /// 见 ADR-0007。
+    public var deletedAt: Date?
 
-    public init(id: UUID = UUID(), name: String, color: CategoryColor) {
+    public init(id: UUID = UUID(), name: String, color: CategoryColor, deletedAt: Date? = nil) {
         self.id = id
         self.name = name
         self.color = color
+        self.deletedAt = deletedAt
     }
+
+    public var isDeleted: Bool { deletedAt != nil }
 }
 
 /// 分类可用的颜色。只存色名不存色值 —— 具体色值由视图层决定，
@@ -71,10 +77,14 @@ public struct TodoItem: Identifiable, Codable, Equatable {
     /// 可空只是为了读得进还没有这个字段的旧数据：`Store` 载入时会照老规矩给缺的补上，
     /// 补完之后每条都有。别把「没有位置」当成一种状态来用。
     public var order: Int?
+    /// 删除时刻。删除是打记号，不是抹掉：有值就是删除态，从一切界面消失，记录永远留着。
+    /// 其余字段一概不动 —— 撤销摘掉记号，它就原样回到原来的位置。见 ADR-0007。
+    public var deletedAt: Date?
 
     public init(
         id: UUID = UUID(), text: String, categoryID: Category.ID, done: Bool = false,
-        createdAt: Date = .now, completedAt: Date? = nil, plannedOn: Date? = nil, order: Int? = nil
+        createdAt: Date = .now, completedAt: Date? = nil, plannedOn: Date? = nil, order: Int? = nil,
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.text = text
@@ -84,7 +94,10 @@ public struct TodoItem: Identifiable, Codable, Equatable {
         self.completedAt = completedAt
         self.plannedOn = plannedOn
         self.order = order
+        self.deletedAt = deletedAt
     }
+
+    public var isDeleted: Bool { deletedAt != nil }
 
     /// 过期：未完成，且计划日在「今天」之前。见 ADR-0004（修订了 ADR-0001 的「不设过期」）。
     ///
@@ -172,17 +185,22 @@ public struct FavoriteItem: Identifiable, Codable, Equatable {
     public var urlString: String?
     public var note: String?
     public var createdAt: Date = .now
+    /// 删除时刻。删除是打记号，不是抹掉 —— 与待办、分类同一套，见 ADR-0007。
+    public var deletedAt: Date?
 
     public init(
         id: UUID = UUID(), title: String, urlString: String? = nil,
-        note: String? = nil, createdAt: Date = .now
+        note: String? = nil, createdAt: Date = .now, deletedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
         self.urlString = urlString
         self.note = note
         self.createdAt = createdAt
+        self.deletedAt = deletedAt
     }
+
+    public var isDeleted: Bool { deletedAt != nil }
 
     public var url: URL? {
         guard let s = urlString else { return nil }

@@ -31,5 +31,14 @@ struct WorkdeskApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1000, height: 660)
+        .commands {
+            // ⌘Z 是撤销删除的另一条路：按删除时间从新到旧收，不管占位在不在眼前，
+            // 与占位同一个寿命 —— app 里没有别的可撤销的事，整组就这一件。见 ADR-0007。
+            CommandGroup(replacing: .undoRedo) {
+                Button("撤销删除") { store.undoLastDelete() }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(store.pendingUndos.isEmpty)
+            }
+        }
     }
 }

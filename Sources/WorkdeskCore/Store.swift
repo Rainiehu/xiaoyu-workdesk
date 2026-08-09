@@ -1,13 +1,43 @@
 import Foundation
 import Observation
 
+/// 一扇还开着的撤销窗口：一次删除对应一扇，各自倒计时、各自撤。
+/// 视图层不拿它画占位（占位就是数组里带记号的那条记录），只有 ⌘Z 的从新到旧靠它排队。
+public struct PendingUndo: Identifiable, Equatable {
+    public enum Target: Equatable {
+        case todo(TodoItem.ID)
+        case category(Category.ID)
+        case favorite(FavoriteItem.ID)
+    }
+
+    /// 窗口自己的身份，不是记录的 —— 同一条记录删了撤、撤了又删，是两扇窗口，
+    /// 第一扇的倒计时不该关得掉第二扇。
+    public let id = UUID()
+    public let target: Target
+}
+
 @Observable
 @MainActor
 public final class Store {
     /// 分类的显示顺序就是这个数组的顺序。
+    ///
+    /// 三个数组里住的是活人，外加**还开着撤销窗口的删除态记录**（打着 `deletedAt` 记号）——
+    /// 占位跟着死者的原位走，行留在数组里位置才留得住。窗口一关（或下次启动时清扫），
+    /// 删除态的搬进下面的池子，从此不在任何界面露面。见 ADR-0007。
     public private(set) var categories: [Category] = []
     public private(set) var todos: [TodoItem] = []
     public private(set) var favorites: [FavoriteItem] = []
+
+    /// 删除态的池子：窗口关了的删除记录永远住这儿 —— 不清理、不设回收站，
+    /// 数据留着，哪天要做回收站（或又一次事后好几天才发现的误删）都还有救。
+    /// 分类带着死时的位置（活人中的第几位），撤销的路虽已关，同步的复活还用得着。
+    private(set) var deletedTodos: [TodoItem] = []
+    private(set) var deletedCategories: [PlacedCategory] = []
+    private(set) var deletedFavorites: [FavoriteItem] = []
+
+    /// 还开着的撤销窗口，新的在后。会话态，不落盘 —— 重启后窗口都视作已关
+    /// （`init` 里把落盘时还带着记号的记录清扫进池子）。
+    public private(set) var pendingUndos: [PendingUndo] = []
     #if os(macOS)
     public var usage: UsageSnapshot?
     public var usageLoading = false
@@ -48,11 +78,41 @@ public final class Store {
         categories = load(Self.categoriesFile) ?? []
         todos = load(Self.todosFile) ?? []
         favorites = load("favorites.json") ?? []
+        deletedTodos = load(Self.deletedTodosFile) ?? []
+        deletedCategories = load(Self.deletedCategoriesFile) ?? []
+        deletedFavorites = load(Self.deletedFavoritesFile) ?? []
         syncLog = load(Self.syncLogFile) ?? SyncChangeLog()
         syncShadows = load(Self.shadowsFile) ?? SyncShadows()
         orphanTodos = load(Self.orphansFile) ?? []
         chosenRecordingCategoryID = (load(Self.preferencesFile) as Preferences?)?.recordingCategoryID
+        sweepInterruptedDeletions()
         seedOrders()
+    }
+
+    /// 上次退出时撤销窗口还开着的删除态记录：窗口随会话已关，进池子。
+    /// 分类先量好它在活人中的位置再搬 —— 池子里的位置是同步和复活都要用的料。
+    private func sweepInterruptedDeletions() {
+        if todos.contains(where: \.isDeleted) {
+            deletedTodos.append(contentsOf: todos.filter(\.isDeleted))
+            todos.removeAll(where: \.isDeleted)
+            saveTodos()
+            saveDeletedTodos()
+        }
+        if categories.contains(where: \.isDeleted) {
+            while let i = categories.firstIndex(where: \.isDeleted) {
+                deletedCategories.append(
+                    PlacedCategory(category: categories.remove(at: i), position: livingPosition(before: i))
+                )
+            }
+            saveCategories()
+            saveDeletedCategories()
+        }
+        if favorites.contains(where: \.isDeleted) {
+            deletedFavorites.append(contentsOf: favorites.filter(\.isDeleted))
+            favorites.removeAll(where: \.isDeleted)
+            saveFavorites()
+            saveDeletedFavorites()
+        }
     }
 
     /// 给还没有位置的待办补上位置：按老规矩铺一遍 —— 已排期的在上，按计划日从早到晚；
@@ -106,9 +166,36 @@ public final class Store {
     }
 
     /// 按 id 找回一个分类。沙漏视图里每条待办旁的彩色 tag 靠它取名字和颜色 ——
-    /// 找不着（分类被删了）就是 `nil`，视图层照着这个决定要不要画那个 tag。
+    /// 找不着（分类被删了，含删除态）就是 `nil`，视图层照着这个决定要不要画那个 tag。
+    /// 只认活人：删除态的分类对一切「在用」的语义等于不存在，只有占位和撤销认得它。
     public func category(_ id: Category.ID) -> Category? {
-        categories.first { $0.id == id }
+        categories.first { $0.id == id && !$0.isDeleted }
+    }
+
+    /// 活着的分类。`categories` 数组本身可能夹着还开着撤销窗口的删除态记录（占位靠它站在原位），
+    /// 一切「在用」的场合（记事选择器、移到分类的名单）看的都是这一份。
+    public var livingCategories: [Category] {
+        categories.filter { !$0.isDeleted }
+    }
+
+    /// 一个分类此刻在活人中排第几（数组里它前面有几个活人）。
+    /// 云端的 `position` 字段说的就是这个数 —— 删除态的记录不占位置。
+    private func livingPosition(before index: Int) -> Int {
+        categories[..<index].filter { !$0.isDeleted }.count
+    }
+
+    /// 把一个分类插到活人中的第 `position` 位。数组里可能夹着删除态的占位，
+    /// 所以「第几位」要跳着数；超出末尾就贴在最后。
+    private func insertCategory(_ category: Category, atLivingPosition position: Int) {
+        var living = 0
+        for i in categories.indices where !categories[i].isDeleted {
+            if living == position {
+                categories.insert(category, at: i)
+                return
+            }
+            living += 1
+        }
+        categories.append(category)
     }
 
     /// 改名。空白名字不改 —— 与 `addCategory` 同一副脾气：分类总得有个名字。
@@ -143,35 +230,38 @@ public final class Store {
         }
     }
 
-    /// 除了这一个之外的分类。待办的「移到分类」菜单列的就是它们 ——
-    /// 一条待办没法移到它已经在的地方。
+    /// 除了这一个之外活着的分类。待办的「移到分类」菜单列的就是它们 ——
+    /// 一条待办没法移到它已经在的地方，也没法移进一个删除态的分类。
     public func categories(besides categoryID: Category.ID) -> [Category] {
-        categories.filter { $0.id != categoryID }
+        livingCategories.filter { $0.id != categoryID }
     }
 
-    /// 删掉一个分类。**只删得掉空的** —— 里头还有待办（无论完成与否）就拒绝，
-    /// 一条待办也不动。删除没有撤销、没有回收站，所以宁可在这儿拦住，
-    /// 也不要连带无声地丢掉一批待办。这条约束由 `Store` 保证，不依赖视图层自觉。
+    /// 删掉一个分类。**只删得掉空的** —— 里头还有活着的待办（无论完成与否，删除态的不算数）
+    /// 就拒绝，一条待办也不动。撤销窗口救得回一条手滑，救不回一批：整个分类连着几十条待办
+    /// 一起进删除态，几秒钟里看不清丢了什么，所以宁可在这儿拦住，也不要事后无声地丢失待办。
+    /// 这条约束由 `Store` 保证，不依赖视图层自觉。
     ///
     /// 疏通的路子是 `moveTodo(_:to:)` 或删掉那些待办：分类空了，它自然就删得掉了。
     /// 删到一个不剩是允许的 —— 那时主线回到引导空态，与首次启动是同一个状态。
+    ///
+    /// 删除是打记号：分类留在数组原位撑着占位胶囊，窗口一关才搬进池子。
+    /// 云端那头这只是一次字段更新 —— 记录不消失，见 ADR-0007。
     @discardableResult
     public func deleteCategory(_ id: Category.ID) -> CategoryDeletion {
-        guard let index = categories.firstIndex(where: { $0.id == id }) else { return .noSuchCategory }
-        let mine = todos(in: id)
-        guard mine.isEmpty else { return .refused(todoCount: mine.count) }
-        let entry = categories[index].changeEntry
-        // 下葬时留足殉葬品：另一台设备可能正往这个分类里记待办，那时待办胜，
-        // 分类得带着原名原色原位置复活 —— 墓碑上只有名字，回魂的料在这儿。
-        syncShadows.bury(PlacedCategory(category: categories[index], position: index))
-        saveShadows()
-        categories.remove(at: index)
+        guard let index = categories.firstIndex(where: { $0.id == id }), !categories[index].isDeleted
+        else { return .noSuchCategory }
+        let living = livingTodos(in: id)
+        guard living.isEmpty else { return .refused(todoCount: living.count) }
+        categories[index].deletedAt = .now
         saveCategories()
         logSyncChange { log in
-            log.recordDelete(entry)
-            // 身后的分类都往前挪了一位 —— 位置在云端是记录的字段，挪了就是变了。
-            for category in categories[index...] { log.recordSave(category.changeEntry) }
+            log.recordSave(categories[index].changeEntry)
+            // 身后活着的分类都往前挪了一位 —— 位置在云端是记录的字段，挪了就是变了。
+            for category in categories[(index + 1)...] where !category.isDeleted {
+                log.recordSave(category.changeEntry)
+            }
         }
+        openUndoWindow(.category(id))
         return .deleted
     }
 
@@ -189,13 +279,13 @@ public final class Store {
     /// 就落回第一个分类 —— 「记不起来」于是不是一个要视图层去应付的状态。
     /// 一个分类都没有时是 `nil`：那时无处可记，也就不该记出一条无归属的待办。
     public var recordingCategory: Category? {
-        chosenRecordingCategoryID.flatMap(category) ?? categories.first
+        chosenRecordingCategoryID.flatMap(category) ?? livingCategories.first
     }
 
     /// 选一个分类来记事。这个选择跨重启保留，好让连续记同一类事情不必反复选。
-    /// 指向不存在的分类时什么也不发生，与 `addTodo` 同一副脾气。
+    /// 指向不存在（含删除态）的分类时什么也不发生，与 `addTodo` 同一副脾气。
     public func chooseRecordingCategory(_ id: Category.ID) {
-        guard categories.contains(where: { $0.id == id }) else { return }
+        guard category(id) != nil else { return }
         chosenRecordingCategoryID = id
         savePreferences()
     }
@@ -214,8 +304,9 @@ public final class Store {
     // MARK: - Todos
 
     /// 侧边栏徽标要的数字。派生数据一律从这里出，视图层不自己聚合。
+    /// 删除态的不算 —— 占位还站在原位，但那件事已经不在「要做」的名下了。
     public var unfinishedTodoCount: Int {
-        todos.filter { !$0.done }.count
+        todos.filter { !$0.done && !$0.isDeleted }.count
     }
 
     /// 沙漏视图要的分组：所有分类中排了计划日的待办，按计划日铺成一条轴，日期升序。
@@ -251,8 +342,15 @@ public final class Store {
     }
 
     /// 一个分类里的待办，按记下的先后排列。分类之间因此互不干扰。
+    /// 里头可能夹着还开着撤销窗口的删除态记录 —— 视图层靠它们把占位画在原位；
+    /// 一切「数人头」的场合（非空判断、徽标）用 `livingTodos(in:)`。
     public func todos(in categoryID: Category.ID) -> [TodoItem] {
         todos.filter { $0.categoryID == categoryID }
+    }
+
+    /// 同上，只数活人。「非空分类删不掉」数的就是这一份 —— 删除态的不算数。
+    private func livingTodos(in categoryID: Category.ID) -> [TodoItem] {
+        todos.filter { $0.categoryID == categoryID && !$0.isDeleted }
     }
 
     /// 分类视图要的两列。两套排序规则都在这儿定死，视图层照着铺就是。
@@ -285,7 +383,7 @@ public final class Store {
     ///   好让新记下的这条立刻出现在使用者正看着的那条轴上。
     public func addTodo(_ text: String, in categoryID: Category.ID, plannedOn day: Date? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, categories.contains(where: { $0.id == categoryID }) else { return }
+        guard !t.isEmpty, category(categoryID) != nil else { return }
         let item = TodoItem(text: t, categoryID: categoryID, plannedOn: day, order: topOrder(in: categoryID))
         todos.append(item)
         saveTodos()
@@ -362,7 +460,7 @@ public final class Store {
     /// - Returns: 这一移是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
     public func moveTodo(_ id: TodoItem.ID, to categoryID: Category.ID) -> Bool {
-        guard categories.contains(where: { $0.id == categoryID }),
+        guard category(categoryID) != nil,
               let item = todos.first(where: { $0.id == id }), item.categoryID != categoryID else { return false }
         let top = topOrder(in: categoryID)
         return update(id) {
@@ -407,10 +505,12 @@ public final class Store {
         }
     }
 
+    /// 删掉一条待办。删除是打记号：行留在数组原位撑着占位，窗口一关才搬进池子。
+    /// 云端那头这只是一次字段更新 —— 记录不消失，见 ADR-0007。
     public func deleteTodo(_ item: TodoItem) {
-        todos.removeAll { $0.id == item.id }
-        saveTodos()
-        logSyncChange { $0.recordDelete(item.changeEntry) }
+        guard let i = todos.firstIndex(where: { $0.id == item.id }), !todos[i].isDeleted else { return }
+        update(item.id) { $0.deletedAt = .now }
+        openUndoWindow(.todo(item.id))
     }
 
     /// 改一条待办，落盘并记账。手里那份可能是视图层拿着的旧副本，所以一律按 id 现找现改 ——
@@ -443,89 +543,280 @@ public final class Store {
         logSyncChange { $0.recordSave(item.changeEntry) }
     }
 
+    /// 删掉一条收藏。与待办同一套：打记号、占位、窗口一关进池子。
     public func deleteFavorite(_ item: FavoriteItem) {
-        favorites.removeAll { $0.id == item.id }
+        guard let i = favorites.firstIndex(where: { $0.id == item.id }), !favorites[i].isDeleted else { return }
+        favorites[i].deletedAt = .now
         saveFavorites()
-        logSyncChange { $0.recordDelete(item.changeEntry) }
+        logSyncChange { $0.recordSave(favorites[i].changeEntry) }
+        openUndoWindow(.favorite(item.id))
+    }
+
+    // MARK: - 撤销窗口
+
+    /// 每次删除各开一个窗口、各自倒计时、各自撤 —— 连删几条也救得准中间那条。
+    /// 窗口的寿命就是占位的寿命：几秒一到占位塌掉，记录沉进池子。见 ADR-0007。
+    public static let undoWindowSeconds: TimeInterval = 5
+
+    /// 撤销：⌘Z 按删除时间从新到旧收，不管那个占位当下在不在眼前。
+    /// 一路点得回去 —— 每收一条，再上一条就是下一个。
+    public func undoLastDelete() {
+        guard let entry = pendingUndos.last else { return }
+        switch entry.target {
+        case .todo(let id): undeleteTodo(id)
+        case .category(let id): undeleteCategory(id)
+        case .favorite(let id): undeleteFavorite(id)
+        }
+    }
+
+    /// 撤销一条待办的删除：摘掉记号，它原样回到原来的位置（所有字段都没动过）。
+    /// 活着的待办的分类必须活着 —— 分类若也在删除态，先把它救活，见 ADR-0007 的不变式。
+    public func undeleteTodo(_ id: TodoItem.ID) {
+        if let i = todos.firstIndex(where: { $0.id == id }), todos[i].isDeleted {
+            undeleteCategoryIfNeeded(todos[i].categoryID)
+            update(id) { $0.deletedAt = nil }
+            dismissUndoEntry(for: .todo(id))
+            return
+        }
+        // 窗口已关、记录在池子里：本地界面到不了这儿，同步的复活走的是这条路。
+        guard let j = deletedTodos.firstIndex(where: { $0.id == id }) else { return }
+        var item = deletedTodos.remove(at: j)
+        saveDeletedTodos()
+        item.deletedAt = nil
+        undeleteCategoryIfNeeded(item.categoryID)
+        let at = todos.firstIndex { $0.createdAt > item.createdAt } ?? todos.endIndex
+        todos.insert(item, at: at)
+        saveTodos()
+        logSyncChange { $0.recordSave(item.changeEntry) }
+    }
+
+    /// 撤销一个分类的删除：摘掉记号（占位还开着），或从池子里按死时的位置插回活人堆。
+    /// 两条路都要把身后活人的位置重新记账 —— 它一回来，后面的都往后挪了一位。
+    public func undeleteCategory(_ id: Category.ID) {
+        if let i = categories.firstIndex(where: { $0.id == id }), categories[i].isDeleted {
+            categories[i].deletedAt = nil
+            saveCategories()
+            dismissUndoEntry(for: .category(id))
+            logSyncChange { log in
+                for category in categories[i...] where !category.isDeleted {
+                    log.recordSave(category.changeEntry)
+                }
+            }
+            return
+        }
+        guard let j = deletedCategories.firstIndex(where: { $0.category.id == id }) else { return }
+        var placed = deletedCategories.remove(at: j)
+        saveDeletedCategories()
+        placed.category.deletedAt = nil
+        insertCategory(placed.category, atLivingPosition: placed.position)
+        saveCategories()
+        guard let at = categories.firstIndex(where: { $0.id == id }) else { return }
+        logSyncChange { log in
+            for category in categories[at...] where !category.isDeleted {
+                log.recordSave(category.changeEntry)
+            }
+        }
+    }
+
+    /// 撤销一条收藏的删除。
+    public func undeleteFavorite(_ id: FavoriteItem.ID) {
+        if let i = favorites.firstIndex(where: { $0.id == id }), favorites[i].isDeleted {
+            favorites[i].deletedAt = nil
+            saveFavorites()
+            dismissUndoEntry(for: .favorite(id))
+            logSyncChange { $0.recordSave(favorites[i].changeEntry) }
+            return
+        }
+        guard let j = deletedFavorites.firstIndex(where: { $0.id == id }) else { return }
+        var item = deletedFavorites.remove(at: j)
+        saveDeletedFavorites()
+        item.deletedAt = nil
+        let at = favorites.firstIndex { $0.createdAt > item.createdAt } ?? favorites.endIndex
+        favorites.insert(item, at: at)
+        saveFavorites()
+        logSyncChange { $0.recordSave(item.changeEntry) }
+    }
+
+    /// 不变式的执行处：哪条路救活一条待办，分类就跟着复活。活着的就什么也不做。
+    private func undeleteCategoryIfNeeded(_ id: Category.ID) {
+        guard category(id) == nil else { return }
+        undeleteCategory(id)
+    }
+
+    /// 开一扇撤销窗口，几秒后自己关上。窗口是会话态：不落盘，重启即全关。
+    private func openUndoWindow(_ target: PendingUndo.Target) {
+        let entry = PendingUndo(target: target)
+        pendingUndos.append(entry)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.undoWindowSeconds))
+            self?.expireUndoWindow(entry.id)
+        }
+    }
+
+    /// 窗口到点关上：占位塌掉，记录搬进池子。已经撤销过（条目没了）就什么也不做。
+    /// 内部可见只为可测 —— 测试不必真等那几秒。
+    func expireUndoWindow(_ token: PendingUndo.ID) {
+        guard let index = pendingUndos.firstIndex(where: { $0.id == token }) else { return }
+        let target = pendingUndos.remove(at: index).target
+        switch target {
+        case .todo(let id):
+            guard let i = todos.firstIndex(where: { $0.id == id }), todos[i].isDeleted else { return }
+            deletedTodos.append(todos.remove(at: i))
+            saveTodos()
+            saveDeletedTodos()
+        case .category(let id):
+            guard let i = categories.firstIndex(where: { $0.id == id }), categories[i].isDeleted else { return }
+            deletedCategories.append(
+                PlacedCategory(category: categories.remove(at: i), position: livingPosition(before: i))
+            )
+            saveCategories()
+            saveDeletedCategories()
+        case .favorite(let id):
+            guard let i = favorites.firstIndex(where: { $0.id == id }), favorites[i].isDeleted else { return }
+            deletedFavorites.append(favorites.remove(at: i))
+            saveFavorites()
+            saveDeletedFavorites()
+        }
+    }
+
+    /// 撤销落定（本地点了撤销，或云端来的版本说它活着）：这扇窗口不再有事可做。
+    private func dismissUndoEntry(for target: PendingUndo.Target) {
+        pendingUndos.removeAll { $0.target == target }
     }
 
     // MARK: - 同步
 
-    /// 云端来的一条收藏，静静落在该在的位置。躺在墓碑里的不复活 —— 本地删了、
-    /// 删除还没送达云端时，一次迟到的抓取可能把它又带回来，那不是它复活的理由。
-    /// 已有同名的就原样替换（收藏没有编辑，替换只是幂等）；没有的按收藏时刻插进流里 ——
-    /// 两台设备各收各的，最后看到的是同一条按时间铺开的流，不是按谁先联网铺开的。
+    /// 云端来的一条收藏，静静落在该在的位置。收藏没有编辑，唯一会变的方面是删除记号 ——
+    /// 本地还欠着它一笔保存（刚删或刚撤销、还没送出去）就以本地为准：云端这份是迟到的旧样子，
+    /// 不该被网络时序顶回来（从前墓碑挡的就是这一手）。
+    /// 活着的：已有同名的原样替换，没有的按收藏时刻插进流里 —— 两台设备各收各的，
+    /// 最后看到的是同一条按时间铺开的流。删除态的进池子；占位还开着就留在原位。
     func applyRemoteFavorite(_ item: FavoriteItem) {
         guard !syncLog.isTombstoned(item.changeEntry) else { return }
-        if let i = favorites.firstIndex(where: { $0.id == item.id }) {
-            favorites[i] = item
+        guard !syncLog.pendingSaves.contains(item.changeEntry) else { return }
+        if item.isDeleted {
+            if pendingUndos.contains(where: { $0.target == .favorite(item.id) }),
+               let i = favorites.firstIndex(where: { $0.id == item.id }) {
+                favorites[i] = item
+            } else {
+                favorites.removeAll { $0.id == item.id }
+                deletedFavorites.removeAll { $0.id == item.id }
+                deletedFavorites.append(item)
+                saveDeletedFavorites()
+            }
         } else {
-            let at = favorites.firstIndex { $0.createdAt > item.createdAt } ?? favorites.endIndex
-            favorites.insert(item, at: at)
+            deletedFavorites.removeAll { $0.id == item.id }
+            saveDeletedFavorites()
+            dismissUndoEntry(for: .favorite(item.id))
+            if let i = favorites.firstIndex(where: { $0.id == item.id }) {
+                favorites[i] = item
+            } else {
+                let at = favorites.firstIndex { $0.createdAt > item.createdAt } ?? favorites.endIndex
+                favorites.insert(item, at: at)
+            }
         }
         saveFavorites()
     }
 
-    /// 云端删掉的一条收藏，本机也删，欠着的保存一并勾销 —— 与待办同一条删除胜的规矩。
-    /// 本来就没有就什么也不发生 —— 两台设备先后删同一条是常事，不是错。
+    /// 云端来的一条收藏的**记录删除**。新语义下记录只增改不消失（ADR-0007），
+    /// 这只可能来自还没升级的旧客户端 —— 转成本地的删除态进池子，内容能留多少留多少。
+    /// 远端来的删除不开撤销窗口，静静落下。
     func applyRemoteFavoriteDeletion(recordName: String) {
         guard let id = UUID(uuidString: recordName) else { return }
-        favorites.removeAll { $0.id == id }
-        saveFavorites()
+        dismissUndoEntry(for: .favorite(id))
+        if let i = favorites.firstIndex(where: { $0.id == id }) {
+            var item = favorites.remove(at: i)
+            if item.deletedAt == nil { item.deletedAt = .now }
+            deletedFavorites.removeAll { $0.id == id }
+            deletedFavorites.append(item)
+            saveFavorites()
+            saveDeletedFavorites()
+        }
         settleSyncSave(recordName: recordName)
     }
 
-    /// 引擎发记录时按名字取货。取不着就是本地已经删了 —— 引擎照着 `nil` 放弃那次保存。
+    /// 引擎发记录时按名字取货。删除态的照发 —— 删除在云端就是一次字段更新，
+    /// 池子里的记录也是记录。真取不着才是本地根本没有这条，引擎照着 `nil` 放弃那次保存。
     func favorite(recordName: String) -> FavoriteItem? {
         guard let id = UUID(uuidString: recordName) else { return nil }
-        return favorites.first { $0.id == id }
+        return favorites.first { $0.id == id } ?? deletedFavorites.first { $0.id == id }
     }
 
     /// 同上，取的是待办。
     func todo(recordName: String) -> TodoItem? {
         guard let id = UUID(uuidString: recordName) else { return nil }
-        return todos.first { $0.id == id }
+        return todos.first { $0.id == id } ?? deletedTodos.first { $0.id == id }
     }
 
-    /// 同上，取的是分类。此刻排第几一并带出 —— 位置不落在模型上
+    /// 同上，取的是分类。此刻在活人中排第几一并带出 —— 位置不落在模型上
     /// （`categories` 数组的顺序就是顺序），云端的记录却少不了这个字段。
+    /// 删除态的带死时的位置：那是它撤销时该回去的地方。
     func category(recordName: String) -> (category: Category, position: Int)? {
-        guard let id = UUID(uuidString: recordName),
-              let i = categories.firstIndex(where: { $0.id == id }) else { return nil }
-        return (categories[i], i)
+        guard let id = UUID(uuidString: recordName) else { return nil }
+        if let i = categories.firstIndex(where: { $0.id == id }) {
+            return (categories[i], livingPosition(before: i))
+        }
+        if let placed = deletedCategories.first(where: { $0.category.id == id }) {
+            return (placed.category, placed.position)
+        }
+        return nil
     }
 
     /// 云端来的一条待办，静静落在该在的位置。本地没动过它就整条照收；本地还欠着
     /// 它的一笔保存（两边同时在改）就三方合并：影子、本地、云端对比，本地改过的
-    /// 方面重放到云端版上 —— 一边改写、一边改期，两边都保住；同一个方面两边都改，
-    /// 后写的算。躺在墓碑里的不复活，与收藏同一条规矩。
+    /// 方面重放到云端版上 —— 一边改写、一边改期，两边都保住。删除记号也是普通的
+    /// 一个方面：这台删、那台改字，合出来是一条带着新改的字、躺在删除态里的记录 ——
+    /// 撤销救回来的正是改过的版本；两台都动记号，后写的算。见 ADR-0007。
     ///
-    /// 归属的分类还没到（云端的抓取不保证先送分类）就先去候着，一条也不丢。
-    /// 归属的分类是本地删掉的，那是「删分类」对上了「往里记待办」：待办胜，
-    /// 分类带着殉葬品复活。归属分类在本地是硬约束，云端来的也不例外。
+    /// 合并后活着的落回活人堆（占位开着就当场撤销落定）；删除态的进池子 ——
+    /// 除非它的占位还开着：那是本地刚删、云端回声，占位继续站着。
+    ///
+    /// 活着的待办要有活着的分类：归属的分类还没到（云端的抓取不保证先送分类）
+    /// 就先去候着，一条也不丢；归属的分类在本地是删除态，那是「删分类」对上了
+    /// 「往里记待办」—— 待办胜，分类复活（不变式，同步也不例外）。
+    /// 删除态的待办没有这个要求，分类在不在都进池子。
     /// - Parameter modifiedAt: 云端这份的 modificationDate，判「后写」的云端一半。
     func applyRemoteTodo(_ item: TodoItem, modifiedAt: Date? = nil) {
         guard !syncLog.isTombstoned(item.changeEntry) else { return }
-        if !categories.contains(where: { $0.id == item.categoryID }) {
-            guard reviveBuriedCategory(item.categoryID) else {
-                stashOrphan(item)
-                return
-            }
+        var landed = item
+        if let local = todos.first(where: { $0.id == item.id }) ?? deletedTodos.first(where: { $0.id == item.id }),
+           syncLog.pendingSaves.contains(item.changeEntry) {
+            landed = SyncMerge.todo(
+                shadow: syncShadows.todo(named: item.recordName),
+                local: local,
+                remote: item,
+                localIsLater: localWroteLater(item.recordName, than: modifiedAt)
+            )
         }
-        if let i = todos.firstIndex(where: { $0.id == item.id }) {
-            todos[i] = syncLog.pendingSaves.contains(item.changeEntry)
-                ? SyncMerge.todo(
-                    shadow: syncShadows.todo(named: item.recordName),
-                    local: todos[i],
-                    remote: item,
-                    localIsLater: localWroteLater(item.recordName, than: modifiedAt)
-                )
-                : item
+        if landed.isDeleted {
+            if pendingUndos.contains(where: { $0.target == .todo(item.id) }),
+               let i = todos.firstIndex(where: { $0.id == item.id }) {
+                todos[i] = landed
+            } else {
+                todos.removeAll { $0.id == item.id }
+                deletedTodos.removeAll { $0.id == item.id }
+                deletedTodos.append(landed)
+                saveDeletedTodos()
+            }
         } else {
-            // 按创建时刻插进数组 —— 数组的先后就是轴上同一天里的先后，
-            // 两台设备各收各的，最后同一天里看到的次序也该是同一个。
-            let at = todos.firstIndex { $0.createdAt > item.createdAt } ?? todos.endIndex
-            todos.insert(item, at: at)
+            if category(landed.categoryID) == nil {
+                undeleteCategoryIfDeletedState(landed.categoryID)
+                if category(landed.categoryID) == nil, !reviveBuriedCategory(landed.categoryID) {
+                    stashOrphan(landed)
+                    return
+                }
+            }
+            deletedTodos.removeAll { $0.id == item.id }
+            saveDeletedTodos()
+            dismissUndoEntry(for: .todo(item.id))
+            if let i = todos.firstIndex(where: { $0.id == item.id }) {
+                todos[i] = landed
+            } else {
+                // 按创建时刻插进数组 —— 数组的先后就是轴上同一天里的先后，
+                // 两台设备各收各的，最后同一天里看到的次序也该是同一个。
+                let at = todos.firstIndex { $0.createdAt > landed.createdAt } ?? todos.endIndex
+                todos.insert(landed, at: at)
+            }
         }
         saveTodos()
         // 影子对齐到云端此刻的样子 —— 合并后本地多出的那些改动还挂在账上，
@@ -534,13 +825,20 @@ public final class Store {
         saveShadows()
     }
 
-    /// 云端删掉的一条待办，本机也删；还在候着没落地的一并撤掉。删除胜 ——
-    /// 本地哪怕还欠着一笔改动的保存也照删，欠的账一并勾销：不勾销，那笔保存
-    /// 会把它在云端重新立起来。本来就没有就什么也不发生 —— 先后删同一条是常事，不是错。
+    /// 云端来的一条待办的**记录删除**。新语义下记录只增改不消失（ADR-0007），
+    /// 这只可能来自还没升级的旧客户端 —— 转成本地的删除态进池子，内容能留多少留多少；
+    /// 还在候着没落地的一并撤掉。远端来的删除不开撤销窗口，静静落下。
     func applyRemoteTodoDeletion(recordName: String) {
         guard let id = UUID(uuidString: recordName) else { return }
-        todos.removeAll { $0.id == id }
-        saveTodos()
+        dismissUndoEntry(for: .todo(id))
+        if let i = todos.firstIndex(where: { $0.id == id }) {
+            var item = todos.remove(at: i)
+            if item.deletedAt == nil { item.deletedAt = .now }
+            deletedTodos.removeAll { $0.id == id }
+            deletedTodos.append(item)
+            saveTodos()
+            saveDeletedTodos()
+        }
         settleSyncSave(recordName: recordName)
         syncShadows.drop(recordName: recordName)
         saveShadows()
@@ -550,10 +848,23 @@ public final class Store {
         }
     }
 
-    /// 云端来的一个分类，落到它记录里写的那个位置上。本地没动过它就整条照收；
-    /// 本地还欠着它的一笔保存就三方合并 —— 一边改名、一边换色，两边都保住。
-    /// 两台各自建过同名分类就是两个分类 —— UUID 不同，并集里并存，不做自动合并。
-    /// 落定之后把候着的孤儿待办接回来。
+    /// 不变式在同步里的那一半：分类在本地是删除态（占位开着或已进池子）就救活它。
+    /// 复活是本地的一次表态，`undeleteCategory` 会把它记上账、推回云端。
+    private func undeleteCategoryIfDeletedState(_ id: Category.ID) {
+        if categories.contains(where: { $0.id == id && $0.isDeleted })
+            || deletedCategories.contains(where: { $0.category.id == id }) {
+            undeleteCategory(id)
+        }
+    }
+
+    /// 云端来的一个分类，落到它记录里写的那个位置上（活人中的第几位）。本地没动过它
+    /// 就整条照收；本地还欠着它的一笔保存就三方合并 —— 一边改名、一边换色，两边都保住，
+    /// 删除记号也是普通的一个方面。两台各自建过同名分类就是两个分类 —— UUID 不同，
+    /// 并集里并存，不做自动合并。
+    ///
+    /// 合并后删除态的：里头还有活着的待办就是「删分类」对上了「往里记待办」——
+    /// 待办胜、分类复活，复活是本地的表态，记账推回云端；真空的进池子（占位开着就留在原位）。
+    /// 活着的落回活人堆，并把候着的孤儿待办接回来。
     ///
     /// 一批里有好几个分类时，调用方按位置从小到大交进来（`CloudSync.landingOrder`
     /// 摆正次序）—— 这儿逐条「插到第几位」，从小到大插完的一排才是记录说的那一排。
@@ -561,49 +872,80 @@ public final class Store {
     func applyRemoteCategory(_ category: Category, position: Int, modifiedAt: Date? = nil) {
         guard !syncLog.isTombstoned(category.changeEntry) else { return }
         var landing = PlacedCategory(category: category, position: position)
-        if let i = categories.firstIndex(where: { $0.id == category.id }),
-           syncLog.pendingSaves.contains(category.changeEntry) {
+        let local: PlacedCategory? =
+            if let i = categories.firstIndex(where: { $0.id == category.id }) {
+                PlacedCategory(category: categories[i], position: livingPosition(before: i))
+            } else {
+                deletedCategories.first { $0.category.id == category.id }
+            }
+        if let local, syncLog.pendingSaves.contains(category.changeEntry) {
             landing = SyncMerge.category(
                 shadow: syncShadows.category(named: category.recordName),
-                local: PlacedCategory(category: categories[i], position: i),
+                local: local,
                 remote: landing,
                 localIsLater: localWroteLater(category.recordName, than: modifiedAt)
             )
         }
-        categories.removeAll { $0.id == category.id }
-        categories.insert(landing.category, at: min(max(landing.position, 0), categories.endIndex))
-        saveCategories()
+        if landing.category.isDeleted, !livingTodos(in: category.id).isEmpty {
+            // 待办胜：云端说删，本地里头还有活人 —— 分类留下，把复活说给云端。
+            landing.category.deletedAt = nil
+            logSyncChange { $0.recordSave(landing.category.changeEntry) }
+        }
+        if landing.category.isDeleted {
+            if pendingUndos.contains(where: { $0.target == .category(category.id) }),
+               let i = categories.firstIndex(where: { $0.id == category.id }) {
+                categories[i] = landing.category
+                saveCategories()
+            } else {
+                categories.removeAll { $0.id == category.id }
+                deletedCategories.removeAll { $0.category.id == category.id }
+                deletedCategories.append(landing)
+                saveCategories()
+                saveDeletedCategories()
+            }
+        } else {
+            deletedCategories.removeAll { $0.category.id == category.id }
+            saveDeletedCategories()
+            dismissUndoEntry(for: .category(category.id))
+            categories.removeAll { $0.id == category.id }
+            insertCategory(landing.category, atLivingPosition: max(landing.position, 0))
+            saveCategories()
+        }
         syncShadows.align(category: PlacedCategory(category: category, position: position))
         saveShadows()
-        adoptOrphans(of: category.id)
+        if !landing.category.isDeleted { adoptOrphans(of: category.id) }
     }
 
-    /// 云端删掉的一个分类。里头还有待办就是「删分类」对上了「往里记待办」：待办胜，
-    /// 分类留下 —— 但它在云端已经被删了，本地是复活的一方，得把复活说出去：
-    /// 重新记账推回云端，否则两边就此各说各话。空的照删，并留下殉葬品 ——
-    /// 归属它的待办仍可能从别处晚一步到来。
+    /// 云端来的一个分类的**记录删除**。新语义下记录只增改不消失（ADR-0007），
+    /// 这只可能来自还没升级的旧客户端。里头还有活着的待办就是「删分类」对上了
+    /// 「往里记待办」：待办胜，分类留下，复活记账推回云端。真空的转成删除态进池子 ——
+    /// 归属它的待办仍可能从别处晚一步到来，复活的料就在池子里。
     func applyRemoteCategoryDeletion(recordName: String) {
         guard let id = UUID(uuidString: recordName),
               let index = categories.firstIndex(where: { $0.id == id }) else { return }
-        guard todos(in: id).isEmpty else {
+        guard livingTodos(in: id).isEmpty else {
             logSyncChange { $0.recordSave(categories[index].changeEntry) }
             return
         }
-        syncShadows.bury(PlacedCategory(category: categories[index], position: index))
-        saveShadows()
+        dismissUndoEntry(for: .category(id))
+        var buried = PlacedCategory(category: categories[index], position: livingPosition(before: index))
+        if buried.category.deletedAt == nil { buried.category.deletedAt = .now }
         categories.remove(at: index)
+        deletedCategories.removeAll { $0.category.id == id }
+        deletedCategories.append(buried)
         saveCategories()
+        saveDeletedCategories()
         // 欠着的改名换色已无处可去 —— 云端删了它，本地也认了，那笔账就此勾销。
         settleSyncSave(recordName: recordName)
     }
 
-    /// 云端来的待办指认的分类已经在本地下了葬：待办胜，分类带着名字、颜色与位置复活。
-    /// 复活是本地的一次表态 —— 记一笔保存把它说给云端（云端那头它可能也已经被删了）；
-    /// 这一笔顺手撤掉还没送出去的墓碑：账本的老规矩，有保存要记就说明它又活了。
+    /// 云端来的待办指认的分类躺在**旧版本的殉葬品**里（硬删除时代埋下的）：
+    /// 待办胜，分类带着名字、颜色与位置复活。新语义下不再下葬（池子接了这活儿），
+    /// 这条路只为迁移期还埋着的旧坟留着。
     private func reviveBuriedCategory(_ id: Category.ID) -> Bool {
         guard let buried = syncShadows.exhumeCategory(named: id.uuidString) else { return false }
         saveShadows()
-        categories.insert(buried.category, at: min(max(buried.position, 0), categories.endIndex))
+        insertCategory(buried.category, atLivingPosition: max(buried.position, 0))
         saveCategories()
         logSyncChange { $0.recordSave(buried.category.changeEntry) }
         return true
@@ -674,6 +1016,10 @@ public final class Store {
         for category in categories { syncLog.recordSave(category.changeEntry) }
         for todo in todos { syncLog.recordSave(todo.changeEntry) }
         for item in favorites { syncLog.recordSave(item.changeEntry) }
+        // 池子里的也是记录：不补这一笔，删除态就只留在这一台机器上。
+        for placed in deletedCategories { syncLog.recordSave(placed.category.changeEntry) }
+        for todo in deletedTodos { syncLog.recordSave(todo.changeEntry) }
+        for item in deletedFavorites { syncLog.recordSave(item.changeEntry) }
         save(syncLog, to: Self.syncLogFile)
         syncLogDidChange?()
     }
@@ -789,10 +1135,18 @@ public final class Store {
     /// 候着的孤儿待办：云端先到的待办，归属的分类还没到。同样与数据分开存 ——
     /// 它们还不是这台机器的数据，只是在等落地的资格。
     private static let orphansFile = "sync-orphans.json"
+    /// 删除态的池子。与活人分开存 —— 它们不再是界面要看的数据，只是永远留着的记号，
+    /// 见 ADR-0007。
+    private static let deletedTodosFile = "deleted-todos.json"
+    private static let deletedCategoriesFile = "deleted-categories.json"
+    private static let deletedFavoritesFile = "deleted-favorites.json"
 
     private func saveCategories() { save(categories, to: Self.categoriesFile) }
     private func saveTodos() { save(todos, to: Self.todosFile) }
     private func saveFavorites() { save(favorites, to: "favorites.json") }
+    private func saveDeletedTodos() { save(deletedTodos, to: Self.deletedTodosFile) }
+    private func saveDeletedCategories() { save(deletedCategories, to: Self.deletedCategoriesFile) }
+    private func saveDeletedFavorites() { save(deletedFavorites, to: Self.deletedFavoritesFile) }
     private func saveOrphans() { save(orphanTodos, to: Self.orphansFile) }
     private func saveShadows() { save(syncShadows, to: Self.shadowsFile) }
 

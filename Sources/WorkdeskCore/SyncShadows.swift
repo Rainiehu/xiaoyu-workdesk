@@ -18,9 +18,9 @@ struct SyncShadows: Codable, Equatable {
     private(set) var todos: [String: TodoItem] = [:]
     /// 每个分类上次与云端对齐时的样子（带位置），按记录名存。
     private(set) var categories: [String: PlacedCategory] = [:]
-    /// 殉葬品：删掉的分类带走的名字、颜色与位置。删分类与往里记待办打架时待办胜，
-    /// 分类要带着原名原色复活 —— 复活的料就从这儿取。墓碑撤了它也不撤：
-    /// 删除送达云端之后，归属它的待办仍可能从另一台设备晚一步到来。
+    /// 殉葬品：删掉的分类带走的名字、颜色与位置。**迁移期遗产** —— ADR-0007 起
+    /// 删除态的分类整个躺在池子里，复活的料不再需要单独陪葬；这儿只剩硬删除时代
+    /// 埋下的旧坟，起一座少一座（`exhumeCategory`）。
     private(set) var buriedCategories: [String: PlacedCategory] = [:]
 
     func todo(named recordName: String) -> TodoItem? {

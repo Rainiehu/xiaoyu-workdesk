@@ -84,17 +84,21 @@ struct TodoCategoryLedgerTests {
         }
     }
 
-    @Test("删待办立起墓碑并勾销欠着的保存")
-    func deletingATodoLogsATombstone() throws {
+    @Test("删待办在账上是一笔普通的保存 —— 删除是打记号，不立墓碑")
+    func deletingATodoLogsASave() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let category = try #require(store.addCategory("工作"))
             store.addTodo("要删的", in: category.id)
             let todo = try #require(store.todos.first)
+            settleAll(store)
 
             store.deleteTodo(todo)
-            #expect(!store.syncLog.pendingSaves.contains(todo.changeEntry))
-            #expect(store.syncLog.isTombstoned(todo.changeEntry))
+            #expect(store.syncLog.pendingSaves.contains(todo.changeEntry))
+            #expect(!store.syncLog.isTombstoned(todo.changeEntry))
+            // 窗口关了、记录进了池子，引擎照样按名字取得着货 —— 删除态的记录也是记录。
+            closeUndoWindows(store)
+            #expect(store.todo(recordName: todo.recordName)?.isDeleted == true)
         }
     }
 
@@ -132,8 +136,8 @@ struct TodoCategoryLedgerTests {
         }
     }
 
-    @Test("删分类立墓碑，身后的分类因位置前移一并上账")
-    func deletingACategoryLogsTombstoneAndShifts() throws {
+    @Test("删分类记自己的一笔保存，身后的分类因位置前移一并上账")
+    func deletingACategoryLogsSaveAndShifts() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let a = try #require(store.addCategory("甲"))
@@ -142,9 +146,11 @@ struct TodoCategoryLedgerTests {
             settleAll(store)
 
             #expect(store.deleteCategory(b.id) == .deleted)
-            #expect(store.syncLog.isTombstoned(b.changeEntry))
-            #expect(Set(store.syncLog.pendingSaves) == [c.changeEntry])
+            #expect(!store.syncLog.isTombstoned(b.changeEntry))
+            #expect(Set(store.syncLog.pendingSaves) == Set([b, c].map(\.changeEntry)))
             #expect(!store.syncLog.pendingSaves.contains(a.changeEntry))
+            // 丙顶上了乙的位置：引擎取货时它的位置是活人中的第 1 位。
+            #expect(store.category(recordName: c.recordName)?.position == 1)
         }
     }
 
@@ -302,14 +308,17 @@ struct RemoteTodoCategoryLandingTests {
         }
     }
 
-    @Test("墓碑拦下迟到的云端分类保存")
-    func tombstoneBlocksLateCategorySave() throws {
+    @Test("本地欠着的删除挡住迟到的云端分类保存 —— 网络时序顶不回来")
+    func pendingDeletionBlocksLateCategorySave() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let category = try #require(store.addCategory("要删的"))
             #expect(store.deleteCategory(category.id) == .deleted)
 
+            // 一次迟到的抓取把删之前的活版本带了回来：合并里删除记号是本地后写的，删除态不动摇。
             store.applyRemoteCategory(category, position: 0)
+            #expect(store.livingCategories.isEmpty)
+            closeUndoWindows(store)
             #expect(store.categories.isEmpty)
         }
     }
@@ -367,8 +376,8 @@ struct RemoteTodoCategoryLandingTests {
         }
     }
 
-    @Test("墓碑拦下迟到的云端待办保存")
-    func tombstoneBlocksLateTodoSave() throws {
+    @Test("本地欠着的删除挡住迟到的云端待办保存 —— 网络时序顶不回来")
+    func pendingDeletionBlocksLateTodoSave() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let category = try #require(store.addCategory("工作"))
@@ -376,7 +385,10 @@ struct RemoteTodoCategoryLandingTests {
             let todo = try #require(store.todos.first)
             store.deleteTodo(todo)
 
+            // 一次迟到的抓取把删之前的活版本带了回来：删除记号是本地后写的，删除态不动摇。
             store.applyRemoteTodo(todo)
+            #expect(store.todos.map(\.isDeleted) == [true])
+            closeUndoWindows(store)
             #expect(store.todos.isEmpty)
         }
     }

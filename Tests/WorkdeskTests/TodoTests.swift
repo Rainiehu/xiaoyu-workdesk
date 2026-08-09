@@ -65,6 +65,10 @@ struct TodoTests {
 
             store.deleteTodo(try #require(store.todos.first))
 
+            // 撤销窗口开着的那几秒：删掉的那条还站在原位撑占位，只是打上了记号。
+            #expect(store.todos(in: work.id).map(\.text) == ["写周报", "交周报"])
+            #expect(try #require(store.todos.first).isDeleted)
+            closeUndoWindows(store)
             #expect(store.todos(in: work.id).map(\.text) == ["交周报"])
         }
     }

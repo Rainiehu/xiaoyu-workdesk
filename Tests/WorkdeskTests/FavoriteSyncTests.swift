@@ -22,15 +22,15 @@ struct FavoriteSyncTests {
         }
     }
 
-    @Test("删除收藏立起墓碑并勾销欠着的保存")
-    func deletingLogsATombstone() throws {
+    @Test("删除收藏在账上是一笔普通的保存 —— 删除是打记号，不立墓碑")
+    func deletingLogsASave() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             store.addFavorite("一段文字")
             let item = try #require(store.favorites.first)
             store.deleteFavorite(item)
-            #expect(store.syncLog.pendingSaves.isEmpty)
-            #expect(store.syncLog.isTombstoned(item.changeEntry))
+            #expect(store.syncLog.pendingSaves == [item.changeEntry])
+            #expect(!store.syncLog.isTombstoned(item.changeEntry))
         }
     }
 
@@ -91,10 +91,10 @@ struct FavoriteSyncTests {
         }
     }
 
-    /// 本地删了、删除还没送达云端时，一次迟到的抓取可能把它又带回来 ——
-    /// 删除是郑重的表态，躺在墓碑里的不复活。
-    @Test("墓碑拦下迟到的云端保存")
-    func tombstoneBlocksLateRemoteSave() throws {
+    /// 本地删了、删除还没送达云端时，一次迟到的抓取可能把删之前的活版本又带回来 ——
+    /// 本地还欠着这笔保存，本地版为准，删除态不该被网络时序顶回来。
+    @Test("本地欠着的删除挡住迟到的云端保存")
+    func pendingDeletionBlocksLateRemoteSave() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             store.addFavorite("要删掉的")
@@ -102,6 +102,8 @@ struct FavoriteSyncTests {
             store.deleteFavorite(item)
 
             store.applyRemoteFavorite(item)
+            #expect(store.favorites.map(\.isDeleted) == [true])
+            closeUndoWindows(store)
             #expect(store.favorites.isEmpty)
         }
     }
@@ -134,8 +136,9 @@ struct FavoriteSyncTests {
             let deleted = try #require(store.favorites.last)
             store.deleteFavorite(deleted)
 
+            // 删除在账上也是一笔保存 —— 两笔都按保存送达销账。
             store.settleSyncSave(recordName: sent.recordName)
-            store.settleSyncDelete(recordName: deleted.recordName)
+            store.settleSyncSave(recordName: deleted.recordName)
             #expect(store.syncLog.isEmpty)
 
             // 销的账落了盘 —— 重启回来不会把已送达的又发一遍。

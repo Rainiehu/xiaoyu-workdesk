@@ -147,6 +147,10 @@ struct CategoryDeletionTests {
 
             #expect(store.deleteCategory(work.id) == .deleted)
 
+            // 撤销窗口开着的那几秒：占位还在原位，活人名单里已经没有它。
+            #expect(store.livingCategories == [life])
+            #expect(try #require(store.categories.first).isDeleted)
+            closeUndoWindows(store)
             #expect(store.categories == [life])
             #expect(Store(directory: dir).categories == [life])
         }
@@ -214,12 +218,13 @@ struct CategoryDeletionTests {
             store.moveTodo(try #require(store.todos.first), to: life.id)
 
             #expect(store.deleteCategory(work.id) == .deleted)
+            closeUndoWindows(store)
             #expect(store.categories == [life])
             #expect(store.todos.map(\.categoryID) == [life.id])
         }
     }
 
-    @Test("把待办删光之后，这个分类也可以删了")
+    @Test("把待办删光之后，这个分类也可以删了 —— 非空数的是活人，删除态的不算数")
     func categoryEmptiedByDeletingTodosIsDeletable() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
@@ -228,8 +233,11 @@ struct CategoryDeletionTests {
 
             store.deleteTodo(try #require(store.todos.first))
 
+            // 那条待办的撤销窗口还开着（占位还在），但它已是删除态 —— 拦不住删分类。
             #expect(store.deleteCategory(work.id) == .deleted)
+            closeUndoWindows(store)
             #expect(store.categories.isEmpty)
+            #expect(store.todos.isEmpty)
         }
     }
 
@@ -241,8 +249,11 @@ struct CategoryDeletionTests {
 
             #expect(store.deleteCategory(work.id) == .deleted)
 
-            #expect(store.categories.isEmpty)
+            // 占位还开着，但记事已无处可去；窗口一关（或重启清扫）就真的一个不剩。
+            #expect(store.livingCategories.isEmpty)
             #expect(store.recordingCategory == nil)
+            closeUndoWindows(store)
+            #expect(store.categories.isEmpty)
             #expect(Store(directory: dir).categories.isEmpty)
         }
     }

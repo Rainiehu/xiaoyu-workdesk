@@ -24,7 +24,13 @@ struct FinishedPanel: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(finished) { todo in
-                            FinishedRow(todo: todo, tint: category.color.tint, today: clock.today)
+                            // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
+                            if todo.isDeleted {
+                                DeletedTodoRow(todo: todo)
+                                    .font(.callout)
+                            } else {
+                                FinishedRow(todo: todo, tint: category.color.tint, today: clock.today)
+                            }
                         }
                     }
                     .padding(.horizontal, 8)

@@ -10,7 +10,9 @@ import Foundation
 /// 就是两台设备各动一样时两样都保得住。
 enum SyncMerge {
     /// 合并一条待办。方面：正文、完成（打勾 + 完成时刻）、计划日、
-    /// 归属与位置（换分类必带新位置，位置也只在所属分类里才有意义）、创建时刻。
+    /// 归属与位置（换分类必带新位置，位置也只在所属分类里才有意义）、创建时刻、删除记号。
+    /// 删除不是特例（「删除胜」已随 ADR-0007 退役）：这台删、那台改字，两边都保住 ——
+    /// 合出来是一条带着新改的字、躺在删除态里的记录；两台都动记号，后写的算。
     static func todo(shadow: TodoItem?, local: TodoItem, remote: TodoItem, localIsLater: Bool) -> TodoItem {
         var merged = remote
         replay(\.text, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
@@ -18,10 +20,12 @@ enum SyncMerge {
         replay(\.plannedOn, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         replay(\.placement, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         replay(\.createdAt, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
+        replay(\.deletedAt, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         return merged
     }
 
-    /// 合并一个分类（带位置）。方面：名字、颜色、位置 —— 改名、换色、挪动各是一次操作。
+    /// 合并一个分类（带位置）。方面：名字、颜色、位置、删除记号 ——
+    /// 改名、换色、挪动、删除各是一次操作。
     static func category(
         shadow: PlacedCategory?, local: PlacedCategory, remote: PlacedCategory, localIsLater: Bool
     ) -> PlacedCategory {
@@ -29,6 +33,7 @@ enum SyncMerge {
         replay(\.category.name, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         replay(\.category.color, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         replay(\.position, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
+        replay(\.category.deletedAt, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         return merged
     }
 

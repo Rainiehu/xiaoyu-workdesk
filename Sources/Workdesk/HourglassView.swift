@@ -172,7 +172,7 @@ private struct RecordingCategoryPicker: View {
 
     var body: some View {
         Menu {
-            ForEach(store.categories) { category in
+            ForEach(store.livingCategories) { category in
                 Button {
                     store.chooseRecordingCategory(category.id)
                 } label: {
@@ -226,7 +226,12 @@ private struct DayGroup: View {
         VStack(alignment: .leading, spacing: 4) {
             header
             ForEach(day.todos) { todo in
-                TimelineRow(todo: todo, today: today)
+                // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
+                if todo.isDeleted {
+                    DeletedTodoRow(todo: todo)
+                } else {
+                    TimelineRow(todo: todo, today: today)
+                }
             }
             // 空着也照样成组的只有今天，所以这句话只属于今天 —— 别的日子没有待办就根本不成组。
             if isToday && day.todos.isEmpty {

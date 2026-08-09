@@ -188,9 +188,37 @@ extension View {
     }
 }
 
-/// 左滑删除。往左一划，身后露出琥珀灰的垃圾桶；划过门槛松手就是删 ——
-/// 与 Mac 的悬停垃圾桶同一个分寸：不弹确认（删除本就郑重，没有撤销），
-/// 但静止时一点痕迹也不留。没过门槛就弹回去，什么也不发生。
+/// 原位占位：刚删掉的待办留在它原来的位置上，撤销窗口开着的那几秒里点撤销就回来 ——
+/// 占位跟着死者的原位走，一行待办活在几处（轴、分类屏、未排期面板、已完成面板），
+/// 占位就在几处，见 ADR-0007。窗口一关它自己塌掉（`Store` 把记录搬进池子）。
+/// 字号与所在列同步：外面罩什么字号就是什么字号，与 `TodoText` 同一条规矩。
+struct DeletedTodoRow: View {
+    @Environment(Store.self) private var store
+    let todo: TodoItem
+
+    var body: some View {
+        HStack(spacing: TodoRowLayout.spacing) {
+            Text("已删除「\(todo.text)」")
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button("撤销") { withAnimation { store.undeleteTodo(todo.id) } }
+                .buttonStyle(.plain)
+                .fontWeight(.semibold)
+                .foregroundStyle(.teal)
+        }
+        .todoRowChrome()
+        .background(
+            RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius)
+                .fill(.quaternary.opacity(0.35))
+        )
+    }
+}
+
+/// 左滑删除。往左一划，身后露出垃圾桶；划过门槛松手就是删 ——
+/// 与 Mac 的悬停垃圾桶同一个分寸：不弹确认 —— 删完那一行原地变成占位
+/// （`DeletedTodoRow`），几秒内点撤销就回来，见 ADR-0007。
+/// 静止时一点痕迹也不留；没过门槛就弹回去，什么也不发生。
 struct SwipeToDelete: ViewModifier {
     let delete: () -> Void
     @State private var offset: CGFloat = 0

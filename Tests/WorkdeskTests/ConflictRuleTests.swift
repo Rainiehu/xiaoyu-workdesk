@@ -129,7 +129,8 @@ struct SyncMergeTests {
     }
 }
 
-/// 三条裁决在 `Store` 里的落地：字段级合并、删除胜、分类复活。
+/// 三条裁决在 `Store` 里的落地：字段级合并（删除记号也是普通一面，ADR-0007）、
+/// 待办胜分类复活、迟到抓取顶不回删除。
 /// 每个场景都从「两边已对齐」的起点出发 —— 账清了、影子对上了，之后的改动才是冲突。
 @MainActor
 @Suite("ConflictRules")
@@ -193,10 +194,13 @@ struct ConflictRuleTests {
         }
     }
 
-    // MARK: - 裁决二：删待办对上改待办，删除胜
+    // MARK: - 裁决二（ADR-0007 改版）：删待办对上改待办，两边都保住
 
-    @Test("一边删待办、一边改同一条，最终两边都没有这条")
-    func deletionBeatsEditOnBothSides() throws {
+    /// 「删除胜」已退役：删除记号只是记录的一个方面，套普通的字段级合并 ——
+    /// 这台删、那台改字，合出来是一条带着新改的字、躺在删除态里的记录，
+    /// 撤销救回来的正是改过的版本。
+    @Test("一边删待办、一边改同一条：改过的字躺在删除态里，两边都保住")
+    func deletionAndEditBothSurvive() throws {
         try withTemporaryDirectory { dirA in
             try withTemporaryDirectory { dirB in
                 let a = Store(directory: dirA)
@@ -210,15 +214,24 @@ struct ConflictRuleTests {
                 a.deleteTodo(todo)
                 b.editTodo(todo, to: "还没送出去的改动")
 
-                // B 的新版本到了 A：墓碑拦下，不复活。
+                // B 的新版本到了 A：正文是 B 改的、删除记号是 A 打的，两样都保住。
+                // A 的撤销窗口还开着 —— 占位上撑着的已经是改过的字。
                 var theirs = todo
                 theirs.text = "还没送出去的改动"
                 a.applyRemoteTodo(theirs, modifiedAt: .distantFuture)
-                #expect(a.todos.isEmpty)
+                let mergedAtA = try #require(a.todos.first)
+                #expect(mergedAtA.isDeleted)
+                #expect(mergedAtA.text == "还没送出去的改动")
 
-                // A 的删除到了 B：本地欠着保存也照删 —— 删除是郑重的表态。
-                b.applyRemoteTodoDeletion(recordName: todo.recordName)
+                // A 的删除到了 B：同一次合并的另一半 —— 远端的删除静静落进池子，
+                // 改过的字跟着进去，不弹窗口。
+                var deleted = todo
+                deleted.deletedAt = .now
+                b.applyRemoteTodo(deleted, modifiedAt: .distantFuture)
                 #expect(b.todos.isEmpty)
+                let mergedAtB = try #require(b.deletedTodos.first)
+                #expect(mergedAtB.isDeleted)
+                #expect(mergedAtB.text == "还没送出去的改动")
             }
         }
     }
@@ -270,22 +283,24 @@ struct ConflictRuleTests {
         }
     }
 
-    @Test("删除还没送出去就等来了待办：墓碑撤掉，那笔删除不再发")
-    func revivalLiftsAPendingTombstone() throws {
+    @Test("删除还没送出去就等来了待办：分类当场复活，撤销窗口落定")
+    func revivalLiftsAPendingDeletion() throws {
         try withTemporaryDirectory { dir in
             let store = Store(directory: dir)
             let category = try #require(store.addCategory("项目"))
             settleAll(store)
             #expect(store.deleteCategory(category.id) == .deleted)
-            #expect(store.syncLog.isTombstoned(category.changeEntry))
+            #expect(store.pendingUndos.count == 1)
 
             var theirs = TodoItem(text: "另一台记下的", categoryID: category.id)
             theirs.order = 0
             store.applyRemoteTodo(theirs)
 
-            #expect(!store.syncLog.isTombstoned(category.changeEntry))
+            // 活着的待办的分类必须活着 —— 复活记上账推回云端，占位跟着落定收场。
+            let revived = try #require(store.categories.first { $0.id == category.id })
+            #expect(!revived.isDeleted)
             #expect(store.syncLog.pendingSaves.contains(category.changeEntry))
-            #expect(store.categories.map(\.id) == [category.id])
+            #expect(store.pendingUndos.isEmpty)
             #expect(store.todos.map(\.id) == [theirs.id])
         }
     }
