@@ -79,8 +79,6 @@ struct CategoryTabChip: View {
     @State private var refusedDeletion = false
     /// 有一条待办正悬在这个 tab 上方。松手它就归到这个分类。
     @State private var targeted = false
-    /// 刚有一条归进这个分类。翻一次触发一记成功震动。
-    @State private var landed = false
 
     var body: some View {
         Button(action: select) {
@@ -98,14 +96,17 @@ struct CategoryTabChip: View {
         // 悬着时胶囊鼓起半档 —— tab 条上撑不开插槽，鼓起就是它的让位。
         .scaleEffect(targeted ? 1.1 : 1)
         // 手势版的「移到分类」。只改归属：三个日子与完成状态都不变。
+        // 归属跨屏，悬着不好「实时预览」—— 这一处仍是松手才落账。
         // 沙漏 tab 不接落点：它不代表任何分类，没有「归到沙漏」这回事。
-        .todoDropTarget { targeted = $0 } perform: { id in
+        .todoDropTarget(entered: { _ in
+            targeted = true
+            Buzz.light.impactOccurred(); Buzz.warm()
+        }, exited: { targeted = false }) { id in
+            targeted = false
             let ok = store.moveTodo(id, to: category.id)
-            if ok { landed.toggle() }
+            if ok { Buzz.notify.notificationOccurred(.success) }
             return ok
         }
-        .dropTargetHaptic(targeted)
-        .sensoryFeedback(.success, trigger: landed)
         .animation(.spring(duration: 0.25), value: targeted)
         .contextMenu {
             Button("重命名…") {

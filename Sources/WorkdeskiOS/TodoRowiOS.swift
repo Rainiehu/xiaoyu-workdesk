@@ -165,44 +165,44 @@ extension View {
     }
 }
 
-/// 拖起来时手上跟着的那一小块：就是这条待办的正文。与 Mac 同一副 ——
-/// 整行连着底色一起拖会盖住下面的落点，只带一句字轻便得多。
-struct TodoDragPreview: View {
-    let text: String
-    let tint: Color
-
-    var body: some View {
-        Text(text)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius).fill(tint.opacity(0.15))
-            )
-    }
-}
-
 /// app 内正拖着的那条待办。系统的 NSItemProvider 只是占位 —— 这些拖拽出不了
 /// 这个 app（类型是自家的），id 犯不着序列化一个来回，放在这儿落点同步取用。
-///
-/// 试过拖起时把源行从列表里收起：源视图一塌，系统拖拽会话跟着乱，落点全瞎 ——
-/// 「拖起后源行离场」这件事只能等自绘拖拽那一轮做。
 enum TodoDrag {
     static var current: TodoItem.ID?
 }
 
+/// 拖拽的三记震动，共用一套常驻的发生器，打之前有预热 —— 现用现建的发生器
+/// 引擎是冷的，第一记常被吞掉（松手的成功震偶尔失踪，根子就是它）。
+enum Buzz {
+    static let light = UIImpactFeedbackGenerator(style: .light)
+    static let medium = UIImpactFeedbackGenerator(style: .medium)
+    static let notify = UINotificationFeedbackGenerator()
+
+    static func warm() {
+        light.prepare()
+        notify.prepare()
+    }
+}
+
 /// 一个落点的三件事：进来、走开、接住。提案一律 `.move` —— 拖一条待办是移动，
 /// 不是增加，系统才不会在拖拽预览上挂一枚「复制」的绿加号。
+///
+/// 「拖到哪列表就当场变成哪样」靠 `entered`：悬进来的瞬间落点直接落账
+/// （换位、改期），列表本身就是预览 —— 不再另画预渲染的空位。
 private struct TodoDropDelegate: DropDelegate {
-    let targeted: (Bool) -> Void
+    var entered: (TodoItem.ID) -> Void = { _ in }
+    var exited: () -> Void = {}
     let perform: (TodoItem.ID) -> Bool
 
     func validateDrop(info: DropInfo) -> Bool { TodoDrag.current != nil }
-    func dropEntered(info: DropInfo) { targeted(true) }
-    func dropExited(info: DropInfo) { targeted(false) }
+    func dropEntered(info: DropInfo) {
+        if let id = TodoDrag.current { entered(id) }
+    }
+    func dropExited(info: DropInfo) { exited() }
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
 
     func performDrop(info: DropInfo) -> Bool {
-        targeted(false)
+        exited()
         guard let id = TodoDrag.current else { return false }
         TodoDrag.current = nil
         return perform(id)
@@ -210,11 +210,17 @@ private struct TodoDropDelegate: DropDelegate {
 }
 
 extension View {
-    /// 抓起一条待办，预览还是那一小块正文。不走 `.draggable` 是为了让落点能把
-    /// 提案改成 `.move` —— 语义对了，绿加号也就没了。
-    func todoDragSource(_ todo: TodoItem, tint: Color) -> some View {
+    /// 抓起一条待办。不走 `.draggable` 是为了让落点能把提案改成 `.move` ——
+    /// 语义对了，系统也不会挂「复制」的绿加号。预览是一粒看不见的点：
+    /// 列表实时换位就是预览，手上不用再浮一小块内容。
+    /// 拎起那一刻直接打一记中震 —— 「抓住了」不用看也知道。
+    func todoDragSource(_ todo: TodoItem) -> some View {
+        // 拎起那一记震动欠着不打：系统拖拽框架里没有「抬起了」的可靠信号 ——
+        // 取件闭包会被预取复用、首次 enter 晚七成秒、并行长按会踩坏拖拽识别，
+        // 三条路都实测过不通。等自绘拖拽那一轮，抬起归自己管了再补。
         onDrag {
             TodoDrag.current = todo.id
+            Buzz.warm()
             let provider = NSItemProvider()
             provider.registerDataRepresentation(
                 forTypeIdentifier: UTType.workdeskTodo.identifier, visibility: .ownProcess
@@ -224,36 +230,23 @@ extension View {
             }
             return provider
         } preview: {
-            TodoDragPreview(text: todo.text, tint: tint)
+            Color.clear.frame(width: 1, height: 1)
         }
     }
 
-    /// 接住一条待办。落下时发生什么由 `perform` 定 —— 与 `DraggedTodo` 的约定一致：
-    /// 抓起的那一头不知道也不必知道。
+    /// 接住一条待办。悬进来那一刻发生什么由 `entered` 定、落下收尾由 `perform` 定 ——
+    /// 与 `DraggedTodo` 的约定一致：抓起的那一头不知道也不必知道。
     func todoDropTarget(
-        targeted: @escaping (Bool) -> Void, perform: @escaping (TodoItem.ID) -> Bool
+        entered: @escaping (TodoItem.ID) -> Void = { _ in },
+        exited: @escaping () -> Void = {},
+        perform: @escaping (TodoItem.ID) -> Bool
     ) -> some View {
-        onDrop(of: [.workdeskTodo], delegate: TodoDropDelegate(targeted: targeted, perform: perform))
+        onDrop(
+            of: [.workdeskTodo],
+            delegate: TodoDropDelegate(entered: entered, exited: exited, perform: perform)
+        )
     }
 
-    /// 拖着的东西悬进落点，指尖轻震一拍 —— 「到了」不用眼睛确认。
-    /// 悬入震、悬出不震；落成的那记走 `.success`，由各落点自己触发。
-    func dropTargetHaptic(_ targeted: Bool) -> some View {
-        sensoryFeedback(.impact(weight: .light), trigger: targeted) { _, entered in entered }
-    }
-}
-
-/// 落点让出来的那一格：一块轻微高亮的空位，不描边不画线 —— 像那一行已经
-/// 预先渲染在这儿、只是还没落笔。「松手就落在这儿」全靠这个位子本身说。
-/// 颜色随所在屏走：分类屏是那个分类的色，沙漏轴是主调青。轴上、主列同一副。
-struct DropSlot: View {
-    let tint: Color
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius)
-            .fill(tint.opacity(0.12))
-            .frame(height: 34)
-    }
 }
 
 /// 一行待办正在改写时的那点状态。与 Mac 同一副：草稿先装上原文，同一下才翻成改写中。
@@ -323,17 +316,30 @@ struct TodoMoveMenu: View {
     }
 }
 
+/// 行上长按菜单的总开关。先关着：长按干干净净全归拖拽的抬起 ——
+/// 菜单（只剩「移到分类」）等磨玻璃自绘那一轮回来，开关一拨即回，代码不删。
+enum RowContextMenu {
+    static let enabled = false
+}
+
 extension View {
     /// 行上的编辑入口：单击整行进就地改写；长按菜单只剩「移到分类」——
     /// 改写有单击、删除有左滑，各有各的路，菜单里不再重复一份。
     /// （菜单的磨玻璃自定义面板等自绘拖拽那一轮一起做 —— 系统菜单的皮改不动。）
     /// 三处一模一样 —— 一行待办能做什么，不看它在哪一列，见 ADR-0003。
+    @ViewBuilder
     func todoRowActions(_ todo: TodoItem, editing: Binding<TodoEditing>) -> some View {
-        contextMenu {
-            TodoMoveMenu(todo: todo)
-        }
-        .onTapGesture {
-            if !editing.wrappedValue.active { editing.wrappedValue.begin(todo) }
+        if RowContextMenu.enabled {
+            contextMenu {
+                TodoMoveMenu(todo: todo)
+            }
+            .onTapGesture {
+                if !editing.wrappedValue.active { editing.wrappedValue.begin(todo) }
+            }
+        } else {
+            onTapGesture {
+                if !editing.wrappedValue.active { editing.wrappedValue.begin(todo) }
+            }
         }
     }
 }

@@ -129,11 +129,6 @@ private struct DayGroup: View {
     let day: TimelineDay
     let today: Date
 
-    /// 有条目正悬在这一组上方。松手落在哪一组，此刻亮的就是哪一组。
-    @State private var targeted = false
-    /// 刚有一条落进这一天。翻一次触发一记成功震动。
-    @State private var landed = false
-
     private var isToday: Bool { day.day.isSameDay(as: today) }
 
     var body: some View {
@@ -147,11 +142,7 @@ private struct DayGroup: View {
                     TimelineRow(todo: todo, today: today)
                 }
             }
-            // 悬着时这一天真的撑开一个位子 —— 槽在末尾：排进一天的东西落在这天的最后。
-            if targeted {
-                DropSlot(tint: .teal)
-            }
-            if isToday && day.todos.isEmpty && !targeted {
+            if isToday && day.todos.isEmpty {
                 Text("今天还没有安排")
                     .font(.callout)
                     .foregroundStyle(.tertiary)
@@ -166,15 +157,20 @@ private struct DayGroup: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(isToday ? AnyShapeStyle(.teal.opacity(0.08)) : AnyShapeStyle(.clear))
         )
-        .animation(.spring(duration: 0.25), value: targeted)
         .contentShape(RoundedRectangle(cornerRadius: 12))
-        .todoDropTarget { targeted = $0 } perform: { id in
-            let ok = store.reschedule(id, to: day.day)
-            if ok { landed.toggle() }
-            return ok
-        }
-        .dropTargetHaptic(targeted)
-        .sensoryFeedback(.success, trigger: landed)
+        // 拖着的行悬进哪一天，当场就排进那一天 —— 轴本身就是预览，
+        // 松手即所见即所得；已经在这天的悬过也不折腾。
+        .todoDropTarget(entered: { id in
+            guard !day.todos.contains(where: { $0.id == id }) else { return }
+            withAnimation(.spring(duration: 0.2)) {
+                if store.reschedule(id, to: day.day) {
+                    Buzz.light.impactOccurred(); Buzz.warm()
+                }
+            }
+        }, perform: { _ in
+            Buzz.notify.notificationOccurred(.success)
+            return true
+        })
     }
 
     /// 日期头。今天的写得大些、重些、是青的 —— 强调它靠字本身。
@@ -224,7 +220,7 @@ private struct TimelineRow: View {
         .contentShape(Rectangle())
         .todoRowActions(todo, editing: $editing)
         // 整行都拖得动，包括已完成的 —— 做完的事也照样可以改它排在哪天。
-        .todoDragSource(todo, tint: tint)
+        .todoDragSource(todo)
         .swipeToDelete(deleteTodo)
     }
 

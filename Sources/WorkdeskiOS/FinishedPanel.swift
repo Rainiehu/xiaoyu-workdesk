@@ -77,7 +77,7 @@ private struct FinishedRow: View {
         .todoRowChrome()
         .contentShape(Rectangle())
         .todoRowActions(todo, editing: $editing)
-        .todoDragSource(todo, tint: tint)
+        .todoDragSource(todo)
         .swipeToDelete(deleteTodo)
     }
 

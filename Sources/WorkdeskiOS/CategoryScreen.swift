@@ -106,10 +106,6 @@ private struct CategoryRow: View {
     let tint: Color
 
     @State private var editing = TodoEditing()
-    /// 有另一行正悬在这一行上方。松手它就落到这一行的位置上。
-    @State private var targeted = false
-    /// 刚有一行落到这个位置。翻一次触发一记成功震动。
-    @State private var landed = false
 
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
@@ -125,23 +121,22 @@ private struct CategoryRow: View {
             PlannedDayEntry(todo: todo)
         }
         .todoRowChrome()
-        // 悬着时这一行上方真的裂开一个位子 —— 落下来就顶替这个位置，行自己让下去。
-        .padding(.top, targeted ? 38 : 0)
-        .overlay(alignment: .top) {
-            if targeted { DropSlot(tint: tint) }
-        }
-        .animation(.spring(duration: 0.25), value: targeted)
         .contentShape(Rectangle())
         .todoRowActions(todo, editing: $editing)
-        .todoDragSource(todo, tint: tint)
-        // 主列的顺序归使用者自己拖：拖一行放到这一行上，它就落到这个位置，见 ADR-0002。
-        .todoDropTarget { targeted = $0 } perform: { id in
-            let ok = store.reorderTodo(id, onto: todo.id)
-            if ok { landed.toggle() }
-            return ok
-        }
-        .dropTargetHaptic(targeted)
-        .sensoryFeedback(.success, trigger: landed)
+        .todoDragSource(todo)
+        // 主列的顺序归使用者自己拖：拖着的行悬到哪一行上，当场就换到那个位置 ——
+        // 列表本身就是预览，松手即所见即所得，见 ADR-0002。
+        .todoDropTarget(entered: { id in
+            guard id != todo.id else { return }
+            withAnimation(.spring(duration: 0.2)) {
+                if store.reorderTodo(id, onto: todo.id) {
+                    Buzz.light.impactOccurred(); Buzz.warm()
+                }
+            }
+        }, perform: { _ in
+            Buzz.notify.notificationOccurred(.success)
+            return true
+        })
         .swipeToDelete(deleteTodo)
     }
 
