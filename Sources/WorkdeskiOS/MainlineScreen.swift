@@ -39,7 +39,13 @@ struct MainlineScreen: View {
                 onboarding
             } else {
                 TabStrip(
-                    selected: selected, select: { selection = $0 }, newCategory: { naming = true },
+                    selected: selected,
+                    select: { tab in
+                        // 换了才嗒一声 —— 点已经站着的 tab 没有「切换」可言。
+                        if tab != selected { Buzz.select.selectionChanged() }
+                        selection = tab
+                    },
+                    newCategory: { naming = true },
                     trailingInset: sync.active ? 44 : 0
                 )
                 // 同步记号浮在 tab 条右端上方 —— 分类再多、横着滚起来它也留在原处。

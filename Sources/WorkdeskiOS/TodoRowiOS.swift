@@ -171,12 +171,14 @@ enum TodoDrag {
     static var current: TodoItem.ID?
 }
 
-/// 拖拽的三记震动，共用一套常驻的发生器，打之前有预热 —— 现用现建的发生器
+/// 触感的那几记，共用一套常驻的发生器，打之前有预热 —— 现用现建的发生器
 /// 引擎是冷的，第一记常被吞掉（松手的成功震偶尔失踪，根子就是它）。
 enum Buzz {
     static let light = UIImpactFeedbackGenerator(style: .light)
     static let medium = UIImpactFeedbackGenerator(style: .medium)
     static let notify = UINotificationFeedbackGenerator()
+    /// 切换 tab 那一嗒 —— 系统「选择变了」的触感，与拨选择器同一种。
+    static let select = UISelectionFeedbackGenerator()
 
     static func warm() {
         light.prepare()
