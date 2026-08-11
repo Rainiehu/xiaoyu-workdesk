@@ -34,7 +34,12 @@ struct MainlineView: View {
                 onboarding
             } else {
                 MainlineTabBar(selected: selected) { selection = $0 }
-                Divider()
+                // tab 栏下的分界不用系统 hairline：两端缩进到 tab 栏的内容边距、
+                // 颜色取墨的一成 —— 是排版里的一条线，不是窗口构件的一道缝。
+                Rectangle()
+                    .fill(.primary.opacity(0.1))
+                    .frame(height: 1)
+                    .padding(.horizontal, 20)
                 content
             }
         }
