@@ -52,6 +52,7 @@ struct CategoryScreen: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollDismissesKeyboard(.interactively)
+        .topEdgeFade()
         .overlay { if todos.isEmpty { hint("都做完了") } }
     }
 

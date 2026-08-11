@@ -9,6 +9,9 @@ struct TabStrip: View {
     let selected: MainlineTab
     let select: (MainlineTab) -> Void
     let newCategory: () -> Void
+    /// 右端被同步记号浮盖的那一截：滚动内容多留这一段，
+    /// 滚到头时最后一枚胶囊仍能整个走出记号底下。
+    var trailingInset: CGFloat = 0
 
     var body: some View {
         ScrollView(.horizontal) {
@@ -37,6 +40,7 @@ struct TabStrip: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, ScreenLayout.screenEdge)
+            .padding(.trailing, trailingInset)
             .padding(.vertical, 8)
         }
         .scrollIndicators(.never)

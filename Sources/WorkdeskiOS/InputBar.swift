@@ -33,7 +33,6 @@ struct InputBar<Trailing: View>: View {
         .padding(.horizontal, ScreenLayout.screenEdge)
         .padding(.vertical, 8)
         .background { PaperTheme.paper.ignoresSafeArea() }
-        .overlay(alignment: .top) { Divider() }
     }
 }
 

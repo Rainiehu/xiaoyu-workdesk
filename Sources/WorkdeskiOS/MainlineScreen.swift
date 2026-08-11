@@ -38,16 +38,29 @@ struct MainlineScreen: View {
             if store.categories.isEmpty {
                 onboarding
             } else {
-                HStack(spacing: 0) {
-                    TabStrip(selected: selected, select: { selection = $0 }, newCategory: { naming = true })
-                    // 同步记号钉在 tab 条右端、可滚动区外面 —— 分类再多、横着滚起来，
-                    // 它也留在原处。只在同步真开着的构建里挂：单机构建不该挂一朵云说谎。
+                TabStrip(
+                    selected: selected, select: { selection = $0 }, newCategory: { naming = true },
+                    trailingInset: sync.active ? 44 : 0
+                )
+                // 同步记号浮在 tab 条右端上方 —— 分类再多、横着滚起来它也留在原处。
+                // 身下垫一道纸色渐变：胶囊滑到它跟前是淡出去，不是被一刀切掉。
+                // 只在同步真开着的构建里挂：单机构建不该挂一朵云说谎。
+                .overlay(alignment: .trailing) {
                     if sync.active {
-                        SyncMark()
-                            .padding(.trailing, 10)
+                        HStack(spacing: 0) {
+                            LinearGradient(
+                                colors: [PaperTheme.paper.opacity(0), PaperTheme.paper],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                            .frame(width: 24)
+                            SyncMark()
+                                .padding(.trailing, 10)
+                                .background(PaperTheme.paper)
+                        }
                     }
                 }
-                Divider()
+                // tab 条与内容之间不画线：靠 tab 条自身的高度与留白分界，
+                // 与输入栏同一条处理 —— 整张纸从上到下连成一体。
                 content
             }
         }

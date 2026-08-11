@@ -38,6 +38,7 @@ struct FinishedPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .scrollIndicators(.never)
+                .topEdgeFade()
                 .opacity(0.62)
             }
         }

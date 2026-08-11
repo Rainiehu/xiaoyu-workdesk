@@ -73,6 +73,7 @@ struct HourglassScreen: View {
             .scrollPosition(id: $anchorDay, anchor: .center)
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
+            .topEdgeFade()
             .onAppear {
                 anchorDay = today.dayStart
             }

@@ -27,6 +27,18 @@ extension View {
         background(PaperTheme.paper.ignoresSafeArea())
     }
 
+    /// 滚动内容的顶缘淡出：与内容区之间不画线（tab 条下、面板头下都一样），
+    /// 行滑到分界处是渐渐隐进纸里，不是被一刀切掉 —— 与云标前胶囊的淡出同一个语汇。
+    func topEdgeFade(_ height: CGFloat = 18) -> some View {
+        mask {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: height)
+                Color.black
+            }
+        }
+    }
+
     /// 一块浮在纸上的卡片：白面、一圈淡墨描边、一道薄影。行和分组不用它 ——
     /// 内容融在纸里不描框（试过全面卡片化，屏上是一格一格的框，撤了）；
     /// 眼下只有输入栏这一件「工具」浮着。
