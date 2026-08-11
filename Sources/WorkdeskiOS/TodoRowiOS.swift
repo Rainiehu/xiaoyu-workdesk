@@ -222,54 +222,75 @@ struct DeletedTodoRow: View {
     }
 }
 
-/// 左滑删除。往左一划，身后露出垃圾桶；划过门槛松手就是删 ——
-/// 与 Mac 的悬停垃圾桶同一个分寸：不弹确认 —— 删完那一行原地变成占位
-/// （`DeletedTodoRow`），几秒内点撤销就回来，见 ADR-0007。
-/// 静止时一点痕迹也不留；没过门槛就弹回去，什么也不发生。
+/// 左滑亮出删除钮。往左一划，行让开一截、身后露出一枚红圆钮，停在那儿 ——
+/// 点这枚钮才真正删（软删＋原位占位，几秒内可撤销，见 ADR-0007）；
+/// 点行上别处或往回一划就合上，什么也不发生。
+/// 划出去就删太容易失手 —— 删除要的是「亮出来、看清了、点下去」三拍。
 struct SwipeToDelete: ViewModifier {
     let delete: () -> Void
     @State private var offset: CGFloat = 0
-    @GestureState private var dragging = false
+    @State private var revealed = false
 
-    /// 划过这个距离松手就是删。
-    private let threshold: CGFloat = 90
+    /// 行让开这一截，正好摆下那枚钮。
+    private let reveal: CGFloat = 64
 
     func body(content: Content) -> some View {
         content
-            .offset(x: offset)
-            .background(alignment: .trailing) {
-                if offset < -4 {
-                    RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius)
-                        .fill(past ? Color.red : Color.red.opacity(0.35))
-                        .overlay(alignment: .trailing) {
-                            Image(systemName: "trash")
-                                .foregroundStyle(.white)
-                                .padding(.trailing, 22)
-                        }
+            // 钮亮着时，行上随便点哪儿都是「合上」—— 不落进行内的编辑。
+            .overlay {
+                if revealed {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { settle(open: false) }
                 }
             }
-            .gesture(
-                DragGesture(minimumDistance: 25)
-                    .updating($dragging) { _, state, _ in state = true }
-                    .onChanged { value in
-                        // 只认往左划；往右不是这儿的手势。
-                        guard value.translation.width < 0,
-                              abs(value.translation.width) > abs(value.translation.height) else { return }
-                        offset = max(value.translation.width, -threshold * 1.4)
-                    }
-                    .onEnded { value in
-                        if offset < -threshold {
-                            withAnimation(.easeOut(duration: 0.15)) { offset = -600 }
-                            delete()
-                        } else {
-                            withAnimation(.spring(duration: 0.25)) { offset = 0 }
-                        }
-                    }
-            )
-            .animation(.easeOut(duration: 0.1), value: past)
+            .offset(x: offset)
+            .background(alignment: .trailing) {
+                if offset < -4 { deleteButton }
+            }
+            .gesture(drag)
     }
 
-    private var past: Bool { offset < -threshold }
+    private var deleteButton: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { offset = -600 }
+            delete()
+        } label: {
+            Image(systemName: "trash")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(.red))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, (reveal - 30) / 2)
+        // 钮随行让开的宽度显影 —— 划到一半就是半张脸。
+        .opacity(min(1, -offset / reveal))
+        .accessibilityLabel("删除")
+    }
+
+    private var drag: some Gesture {
+        // 位移在全局坐标系里量 —— 行自己跟着手指动，本地坐标系会自己追自己。
+        DragGesture(minimumDistance: 25, coordinateSpace: .global)
+            .onChanged { value in
+                // 方向门只把第一下：横移胜过纵移才接手；接了手就一路跟随。
+                guard offset != 0 || abs(value.translation.width) > abs(value.translation.height)
+                else { return }
+                let base: CGFloat = revealed ? -reveal : 0
+                offset = min(0, max(base + value.translation.width, -reveal * 1.3))
+            }
+            .onEnded { _ in
+                settle(open: offset < -reveal * 0.6)
+            }
+    }
+
+    private func settle(open: Bool) {
+        withAnimation(.spring(duration: 0.25)) {
+            offset = open ? -reveal : 0
+            revealed = open
+        }
+    }
 }
 
 extension View {
