@@ -47,7 +47,7 @@ struct CategoryScreen: View {
                     }
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, ScreenLayout.screenEdge)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }

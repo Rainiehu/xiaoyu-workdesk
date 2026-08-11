@@ -13,16 +13,17 @@ struct PullOutPanel<Panel: View>: ViewModifier {
     @Binding var isOpen: Bool
     @ViewBuilder let panel: () -> Panel
 
+    /// 手指拖着面板走过的横向位移（相对这次拖动的起点）。nil ＝ 没在拖。
+    /// 拖动中面板直接跟手 —— 「自己一点点拉出来」的感觉全在这层跟随上；
+    /// 松手才按预测落点定去留。
+    @State private var dragX: CGFloat?
+
     func body(content: Content) -> some View {
         content
             .overlay {
                 if enabled {
                     panelOverlay
                 }
-            }
-            // 把手挂在面板外面：面板收着时它就是右缘那一枚常驻记号。
-            .overlay(alignment: .trailing) {
-                if enabled && !isOpen { edgeHandle }
             }
             .onChange(of: enabled) { _, enabled in
                 if !enabled { isOpen = false }
@@ -32,58 +33,83 @@ struct PullOutPanel<Panel: View>: ViewModifier {
     private var panelOverlay: some View {
         GeometryReader { geo in
             let panelWidth = geo.size.width * 0.76
+            // 面板此刻实际停在哪：静止时在开/收的位子上，拖着就跟手，两头不出界。
+            let restX: CGFloat = isOpen ? 0 : panelWidth
+            let offsetX = min(max(restX + (dragX ?? 0), 0), panelWidth)
+            let progress = 1 - offsetX / panelWidth
+
             ZStack(alignment: .trailing) {
-                // 面板开着时主列退成背景：变暗、点一下就回去。
-                Color.black.opacity(isOpen ? 0.22 : 0)
+                // 主列随拉出的进度退暗 —— 暗几分也跟着手走。点一下就回去。
+                Color.black.opacity(0.22 * progress)
                     .ignoresSafeArea()
                     .onTapGesture { setOpen(false) }
                     .allowsHitTesting(isOpen)
 
-                panelBody(width: panelWidth)
-                    .offset(x: isOpen ? 0 : panelWidth + 40)
+                // 收着时面板本体正好整个滑出屏外，只剩钉在左缘的拉带露在屏缘 ——
+                // 右缘那一枚把手就是面板自己的把手，不是另画的记号。
+                panelBody(width: panelWidth, progress: progress)
+                    .offset(x: offsetX)
+
+                // 收着时罩在拉带上的命中区 —— 拉带本体钉在面板上，这层只接手势。
+                if !isOpen { edgeHitZone(panelWidth: panelWidth) }
             }
-            .animation(.spring(duration: 0.3), value: isOpen)
         }
     }
 
-    private func panelBody(width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            // 面板左缘的把手原位留着：拉出它的那只手，推回去还是它。
-            PanelGrabber()
-                .padding(.leading, 5)
-            panel()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .frame(width: width)
-        .background(
-            UnevenRoundedRectangle(topLeadingRadius: 22, bottomLeadingRadius: 22)
-                .fill(Color(uiColor: .systemBackground))
-                .shadow(color: .black.opacity(0.18), radius: 17, x: -6, y: 0)
-        )
-        .ignoresSafeArea(edges: .bottom)
-        // 面板上往右一划就是收回 —— 与拉出是同一个手势的两个方向。
-        .gesture(
-            DragGesture(minimumDistance: 25)
-                .onEnded { value in
-                    if value.translation.width > 40 { setOpen(false) }
-                }
-        )
+    private func panelBody(width: CGFloat, progress: CGFloat) -> some View {
+        panel()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(width: width)
+            .background(
+                UnevenRoundedRectangle(topLeadingRadius: 22, bottomLeadingRadius: 22)
+                    .fill(PaperTheme.paper)
+                    // 影子随拉出的进度显影：收着时面板贴在屏外，右缘不该常年洇着一道黑。
+                    .shadow(color: .black.opacity(0.18 * progress), radius: 17, x: -6, y: 0)
+            )
+            // 拉带钉在面板左缘、探出缘外 —— 拉开收回全程它与面板相对位置不变：
+            // 把手装在这页上，人只是顺着把手把这一页拉出来。
+            .overlay(alignment: .leading) {
+                LeatherPullTab()
+                    .offset(x: -(LeatherPullTab.size.width - 2))
+            }
+            .ignoresSafeArea(edges: .bottom)
+            // 面板上往右一划就是收回 —— 与拉出是同一个手势的两个方向。
+            .gesture(panelDrag(panelWidth: width, minimumDistance: 25))
     }
 
-    /// 右缘常驻的竖把手。画出来的只有一枚细条，接手势的范围比它大得多 ——
-    /// 指头要的是「往右缘一按一划」，不是精确命中四个点宽的线。
-    private var edgeHandle: some View {
-        PanelGrabber()
-            .padding(.trailing, 5)
-            .frame(width: 32, height: 140)
+    /// 右缘的命中区，收着时罩在拉带上方。画的什么都没有 —— 拉带本体在面板上；
+    /// 这儿只管接手势：44pt 宽一条带，起笔落在带内的一划归把手，
+    /// 落在带外的归行上的左滑删除。起笔位置定归属，两个同方向的横划就此分家。
+    private func edgeHitZone(panelWidth: CGFloat) -> some View {
+        Color.clear
+            .frame(width: 44, height: 140)
             .contentShape(Rectangle())
             .onTapGesture { setOpen(true) }
-            .gesture(
-                DragGesture(minimumDistance: 10)
-                    .onEnded { value in
-                        if value.translation.width < -25 { setOpen(true) }
-                    }
-            )
+            .gesture(panelDrag(panelWidth: panelWidth, minimumDistance: 10))
+    }
+
+    /// 拖面板的那一个手势，开与收共用：拖动中面板跟手，松手按预测落点定去留 ——
+    /// 甩的速度折在预测里，轻甩一下也走得完。门槛略偏向开：预测落点过了六成就算开。
+    private func panelDrag(panelWidth: CGFloat, minimumDistance: CGFloat) -> some Gesture {
+        // 位移必须在全局坐标系里量：收回的手势挂在面板上，面板又跟着手指动，
+        // 用本地坐标系量位移就成了自己追自己 —— 每帧来回跳，看起来是闪。
+        DragGesture(minimumDistance: minimumDistance, coordinateSpace: .global)
+            .onChanged { value in
+                // 方向门只把第一下：横移胜过纵移才接手 —— 顺着列表竖滚不该拖动面板；
+                // 一旦接了手，指头走到哪面板跟到哪。
+                guard dragX != nil || abs(value.translation.width) > abs(value.translation.height)
+                else { return }
+                dragX = value.translation.width
+            }
+            .onEnded { value in
+                guard dragX != nil else { return }
+                let restX: CGFloat = isOpen ? 0 : panelWidth
+                let predicted = restX + value.predictedEndTranslation.width
+                withAnimation(.spring(duration: 0.3)) {
+                    dragX = nil
+                    isOpen = predicted < panelWidth * 0.6
+                }
+            }
     }
 
     private func setOpen(_ open: Bool) {
@@ -91,12 +117,46 @@ struct PullOutPanel<Panel: View>: ViewModifier {
     }
 }
 
-/// 把手那一枚竖条本身。收着时在屏右缘，开着时在面板左缘 —— 同一枚。
-private struct PanelGrabber: View {
+/// 把手本体：一小截缝线皮革拉带，一粒铆钉 —— 看着就是拿来拽的实物，
+/// 不会认成滚动条。它钉死在面板左缘，收着时露在屏缘的、拉开后探在页边的，
+/// 从头到尾是同一枚。
+private struct LeatherPullTab: View {
+    static let size = CGSize(width: 26, height: 50)
+
+    @Environment(\.colorScheme) private var scheme
+
     var body: some View {
-        Capsule()
-            .fill(.tertiary)
-            .frame(width: 4.5, height: 52)
+        let hide: [UInt32] = scheme == .dark
+            ? [0x8A6A42, 0x6E5230, 0x543D20]
+            : [0xCB9D69, 0xB07D47, 0x9A6931]
+        let shape = UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10)
+
+        shape
+            .fill(LinearGradient(
+                colors: hide.map { Color(UIColor(rgb: $0)) },
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ))
+            .overlay(
+                // 缝线：一圈奶白的虚线，内缩在皮面上。
+                UnevenRoundedRectangle(topLeadingRadius: 7, bottomLeadingRadius: 7)
+                    .strokeBorder(
+                        Color(UIColor(rgb: 0xFFF4E1)).opacity(0.55),
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 2.5])
+                    )
+                    .padding(3)
+            )
+            .overlay(alignment: .leading) {
+                // 铆钉：把皮条钉在缘上的那一粒。
+                Circle()
+                    .fill(RadialGradient(
+                        colors: [Color(UIColor(rgb: 0xF6ECDC)), Color(UIColor(rgb: 0x8A6A3F))],
+                        center: .init(x: 0.35, y: 0.3), startRadius: 0, endRadius: 4
+                    ))
+                    .frame(width: 5.5, height: 5.5)
+                    .padding(.leading, 7)
+            }
+            .frame(width: Self.size.width, height: Self.size.height)
+            .shadow(color: .black.opacity(0.28), radius: 3, x: -2, y: 2)
     }
 }
 

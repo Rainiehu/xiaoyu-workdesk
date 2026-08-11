@@ -52,6 +52,10 @@ struct MainlineScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 整个主线铺在同一张纸上，正文一律是墨 —— .secondary/.tertiary 会自己从墨里
+        // 淡出去，灰阶因此都是暖的。
+        .paperGround()
+        .foregroundStyle(PaperTheme.ink)
         .alert("新建分类", isPresented: $naming) {
             TextField("给它起个名字", text: $draftName)
             Button("创建") {

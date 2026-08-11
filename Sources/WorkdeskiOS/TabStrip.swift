@@ -36,7 +36,7 @@ struct TabStrip: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, ScreenLayout.screenEdge)
             .padding(.vertical, 8)
         }
         .scrollIndicators(.never)

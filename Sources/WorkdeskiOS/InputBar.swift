@@ -28,10 +28,11 @@ struct InputBar<Trailing: View>: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 42)
-        .background(RoundedRectangle(cornerRadius: 21).fill(.quaternary.opacity(0.5)))
-        .padding(.horizontal, 12)
+        // 输入栏也是一块浮在纸上的卡片 —— 与行、分组同一副做法。
+        .paperCard(cornerRadius: 21)
+        .padding(.horizontal, ScreenLayout.screenEdge)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background { PaperTheme.paper.ignoresSafeArea() }
         .overlay(alignment: .top) { Divider() }
     }
 }

@@ -15,6 +15,13 @@ enum TodoRowLayout {
     static let cornerRadius: CGFloat = 8
 }
 
+/// 屏缘与面板缘的边距。tab 条、两屏主列、输入栏全从这儿取 —— 一处改，四处动；
+/// 面板窄，取屏缘的七折。行内缩、分组内衬仍归 `TodoRowLayout`，层级不混。
+enum ScreenLayout {
+    static let screenEdge: CGFloat = 20
+    static let panelEdge: CGFloat = 14
+}
+
 /// 一条待办的完成状态圈。空心圈是还没做，实心勾圈是做完了，点一下就翻面。
 /// 过期只换描边成琥珀 —— 安静的记号，不是警报。画哪个状态由调用方给，
 /// 与 Mac 同一条理由：未排期面板里打完勾要先亮一拍。

@@ -31,7 +31,7 @@ struct UnscheduledPanel: View {
                         UnscheduledGroupView(group: group)
                     }
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, ScreenLayout.panelEdge)
                 .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

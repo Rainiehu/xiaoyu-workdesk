@@ -65,7 +65,7 @@ struct HourglassScreen: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                     if significantChange(contentHeight, height) { contentHeight = height }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, ScreenLayout.screenEdge)
                 .padding(.top, insets.top)
                 .padding(.bottom, insets.bottom)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -154,6 +154,7 @@ private struct DayGroup: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
+        // 行融在纸底里，不描框不垫卡 —— 只有今天罩一层青，锚点靠色说话。
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(isToday ? AnyShapeStyle(.teal.opacity(0.08)) : AnyShapeStyle(.clear))
