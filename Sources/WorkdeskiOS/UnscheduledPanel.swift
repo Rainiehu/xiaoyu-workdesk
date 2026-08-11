@@ -67,21 +67,18 @@ private struct UnscheduledGroupView: View {
 /// 面板里的一行：与另外两处同一副结构、同一套本事（打勾、左滑删、长按菜单、
 /// 单击改写、排期入口）。窄列用 callout。
 ///
-/// 打勾让它离开这一列，只是没有看得见的去处，所以那一下走得慢一点：
-/// 圈先填实亮一拍，再淡出 —— 与 Mac 的未排期列同一副。
+/// 打勾让它离开这一列，只是没有看得见的去处 —— 「圈先亮一拍再走」这层节奏
+/// 如今由 `TodoToggle` 统一给（放烟花的那一拍），这儿不必再垫。
 private struct UnscheduledRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
     let tint: Color
 
     @State private var editing = TodoEditing()
-    /// 刚在这一行上打了勾，这条正在离开这一列。那一拍里圈画的是「已完成」
-    /// 而待办本身还没变，所以状态记在这儿，不去问 `todo.done`。
-    @State private var completing = false
 
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
-            TodoToggle(done: completing, tint: tint, toggle: complete)
+            TodoToggle(done: todo.done, tint: tint, toggle: complete)
 
             TodoText(todo: todo, editing: $editing)
                 .font(.callout)
@@ -92,24 +89,16 @@ private struct UnscheduledRow: View {
         }
         .todoRowChrome()
         .contentShape(Rectangle())
-        .todoRowActions(todo, editing: $editing, delete: deleteTodo)
+        .todoRowActions(todo, editing: $editing)
         // 抓的是同一样东西 —— 拖出面板落到轴上露着的那条主列上也是排期，
         // 只是面板盖着轴，这条路窄；主要路径是行上的排期入口。
-        .draggable(DraggedTodo(id: todo.id)) {
-            TodoDragPreview(text: todo.text, tint: tint)
-        }
+        .todoDragSource(todo, tint: tint)
         .swipeToDelete(deleteTodo)
     }
 
-    /// 打勾：圈先亮起来，过一拍这条才真的记成完成、跟着淡出这一列。
-    /// 中间那一拍是说给人看的 —— 没有它，点下去只看得见一行凭空消失。
+    /// 打勾落账，行淡出这一列。亮一拍的事 `TodoToggle` 已经做了。
     private func complete() {
-        guard !completing else { return }
-        completing = true
-        Task {
-            try? await Task.sleep(for: .milliseconds(180))
-            withAnimation(.easeOut(duration: 0.2)) { store.toggleTodo(todo) }
-        }
+        withAnimation(.easeOut(duration: 0.2)) { store.toggleTodo(todo) }
     }
 
     private func deleteTodo() {

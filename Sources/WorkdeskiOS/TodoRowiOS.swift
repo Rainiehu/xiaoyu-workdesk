@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import UniformTypeIdentifiers
 import WorkdeskCore
 
 /// 三处待办行共用的那几样东西，iOS 版。结构与 Mac 完全同一副：
@@ -31,9 +32,18 @@ struct TodoToggle: View {
     let tint: Color
     let toggle: () -> Void
 
+    /// 这回打勾放的那朵烟花的号。换一个号动画从头放；也是成功震动的扳机。
+    @State private var burst = 0
+    @State private var bursting = false
+    /// 取消完成的次数 —— 轻震的扳机：手上有个确认，但不庆祝。
+    @State private var unchecked = 0
+    /// 勾已经点下、账还没落 —— 这一拍里圈先画成完成态，烟花放完行才离场。
+    /// 没有这一拍，分类屏上行会在打勾瞬间搬去已完成，烟花跟着行一起消失。
+    @State private var pending = false
+
     var body: some View {
-        Button(action: toggle) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+        Button(action: fire) {
+            Image(systemName: done || pending ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 18))
                 .foregroundStyle(circleStyle)
                 // 圈本身 18pt，手指要的可点范围比这大 —— 内缩摊进按钮里。
@@ -41,11 +51,85 @@ struct TodoToggle: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .overlay {
+            if bursting {
+                CompletionBurst(tint: tint)
+                    .id(burst)
+                    .allowsHitTesting(false)
+            }
+        }
+        .sensoryFeedback(.success, trigger: burst)
+        .sensoryFeedback(.impact(weight: .light), trigger: unchecked)
+    }
+
+    /// 打勾放烟花、来一记成功震；取消完成只轻震一下 —— 手上有确认，但不庆祝。
+    private func fire() {
+        guard !pending else { return }
+        guard !done else {
+            unchecked += 1
+            toggle()
+            return
+        }
+        pending = true
+        burst += 1
+        bursting = true
+        Task {
+            // 让烟花放到七成再落账（落账后行可能就搬走了）；尾巴再收一拍。
+            try? await Task.sleep(for: .milliseconds(550))
+            toggle()
+            pending = false
+            try? await Task.sleep(for: .milliseconds(450))
+            bursting = false
+        }
     }
 
     private var circleStyle: AnyShapeStyle {
-        if done { return AnyShapeStyle(tint) }
+        if done || pending { return AnyShapeStyle(tint) }
         return overdue ? AnyShapeStyle(Color.overdueAmber) : AnyShapeStyle(.tertiary)
+    }
+}
+
+/// 打勾那一拍从勾圈里绽开的一圈小彩点：飞出去、缩小、隐去，半秒收场。
+/// 颜色只用这一行的 tint 一族深浅 —— 在哪个分类打勾就绽哪家的颜色，
+/// 与落点高亮同一条规矩。
+private struct CompletionBurst: View {
+    let tint: Color
+    @State private var fired = false
+
+    private let count = 16
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<count, id: \.self) { i in
+                let angle = (Double(i) + 0.5) / Double(count) * 2 * .pi
+                let radius: CGFloat = i.isMultiple(of: 2) ? 46 : 32
+                let size: CGFloat = i.isMultiple(of: 3) ? 7 : 5
+                Circle()
+                    .fill(dotColor(i))
+                    .frame(width: size, height: size)
+                    .offset(
+                        x: cos(angle) * (fired ? radius : 9),
+                        y: sin(angle) * (fired ? radius : 9)
+                    )
+                    .scaleEffect(fired ? 0.3 : 1)
+                    .opacity(fired ? 0 : 1)
+            }
+        }
+        .task {
+            // 隔一拍再点火：与插入同一拍的动画会被并进插入渲染，直接落在终态上 ——
+            // 那样一粒也看不见。
+            await Task.yield()
+            withAnimation(.easeOut(duration: 0.85)) { fired = true }
+        }
+    }
+
+    private func dotColor(_ i: Int) -> Color {
+        switch i % 4 {
+        case 0: tint
+        case 1: tint.opacity(0.75)
+        case 2: tint.opacity(0.5)
+        default: tint.opacity(0.3)
+        }
     }
 }
 
@@ -97,15 +181,78 @@ struct TodoDragPreview: View {
     }
 }
 
+/// app 内正拖着的那条待办。系统的 NSItemProvider 只是占位 —— 这些拖拽出不了
+/// 这个 app（类型是自家的），id 犯不着序列化一个来回，放在这儿落点同步取用。
+///
+/// 试过拖起时把源行从列表里收起：源视图一塌，系统拖拽会话跟着乱，落点全瞎 ——
+/// 「拖起后源行离场」这件事只能等自绘拖拽那一轮做。
+enum TodoDrag {
+    static var current: TodoItem.ID?
+}
+
+/// 一个落点的三件事：进来、走开、接住。提案一律 `.move` —— 拖一条待办是移动，
+/// 不是增加，系统才不会在拖拽预览上挂一枚「复制」的绿加号。
+private struct TodoDropDelegate: DropDelegate {
+    let targeted: (Bool) -> Void
+    let perform: (TodoItem.ID) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool { TodoDrag.current != nil }
+    func dropEntered(info: DropInfo) { targeted(true) }
+    func dropExited(info: DropInfo) { targeted(false) }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        targeted(false)
+        guard let id = TodoDrag.current else { return false }
+        TodoDrag.current = nil
+        return perform(id)
+    }
+}
+
 extension View {
-    /// 落点指示：青色描边。「松手会落在这儿」在轴上、tab 条上、主列行上是同一句话，
-    /// 与 Mac 同一个颜色、同一个说法。
-    func dropTargetStroke(_ targeted: Bool, cornerRadius: CGFloat = TodoRowLayout.cornerRadius) -> some View {
-        overlay(
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2)
-        )
-        .animation(.easeOut(duration: 0.12), value: targeted)
+    /// 抓起一条待办，预览还是那一小块正文。不走 `.draggable` 是为了让落点能把
+    /// 提案改成 `.move` —— 语义对了，绿加号也就没了。
+    func todoDragSource(_ todo: TodoItem, tint: Color) -> some View {
+        onDrag {
+            TodoDrag.current = todo.id
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.workdeskTodo.identifier, visibility: .ownProcess
+            ) { completion in
+                completion(try? JSONEncoder().encode(DraggedTodo(id: todo.id)), nil)
+                return nil
+            }
+            return provider
+        } preview: {
+            TodoDragPreview(text: todo.text, tint: tint)
+        }
+    }
+
+    /// 接住一条待办。落下时发生什么由 `perform` 定 —— 与 `DraggedTodo` 的约定一致：
+    /// 抓起的那一头不知道也不必知道。
+    func todoDropTarget(
+        targeted: @escaping (Bool) -> Void, perform: @escaping (TodoItem.ID) -> Bool
+    ) -> some View {
+        onDrop(of: [.workdeskTodo], delegate: TodoDropDelegate(targeted: targeted, perform: perform))
+    }
+
+    /// 拖着的东西悬进落点，指尖轻震一拍 —— 「到了」不用眼睛确认。
+    /// 悬入震、悬出不震；落成的那记走 `.success`，由各落点自己触发。
+    func dropTargetHaptic(_ targeted: Bool) -> some View {
+        sensoryFeedback(.impact(weight: .light), trigger: targeted) { _, entered in entered }
+    }
+}
+
+/// 落点让出来的那一格：一块轻微高亮的空位，不描边不画线 —— 像那一行已经
+/// 预先渲染在这儿、只是还没落笔。「松手就落在这儿」全靠这个位子本身说。
+/// 颜色随所在屏走：分类屏是那个分类的色，沙漏轴是主调青。轴上、主列同一副。
+struct DropSlot: View {
+    let tint: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius)
+            .fill(tint.opacity(0.12))
+            .frame(height: 34)
     }
 }
 
@@ -177,17 +324,13 @@ struct TodoMoveMenu: View {
 }
 
 extension View {
-    /// 行上的编辑入口：单击整行进就地改写，长按菜单是「改写 / 移到分类 / 删除」——
-    /// 对应 Mac 的右键菜单（删除在菜单里也有一份，左滑是它的快捷路径）。
+    /// 行上的编辑入口：单击整行进就地改写；长按菜单只剩「移到分类」——
+    /// 改写有单击、删除有左滑，各有各的路，菜单里不再重复一份。
+    /// （菜单的磨玻璃自定义面板等自绘拖拽那一轮一起做 —— 系统菜单的皮改不动。）
     /// 三处一模一样 —— 一行待办能做什么，不看它在哪一列，见 ADR-0003。
-    func todoRowActions(
-        _ todo: TodoItem, editing: Binding<TodoEditing>, delete: @escaping () -> Void
-    ) -> some View {
+    func todoRowActions(_ todo: TodoItem, editing: Binding<TodoEditing>) -> some View {
         contextMenu {
-            Button("改写") { editing.wrappedValue.begin(todo) }
             TodoMoveMenu(todo: todo)
-            Divider()
-            Button("删除", role: .destructive, action: delete)
         }
         .onTapGesture {
             if !editing.wrappedValue.active { editing.wrappedValue.begin(todo) }

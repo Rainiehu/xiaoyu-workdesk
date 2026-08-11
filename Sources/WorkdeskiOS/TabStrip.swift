@@ -79,6 +79,8 @@ struct CategoryTabChip: View {
     @State private var refusedDeletion = false
     /// 有一条待办正悬在这个 tab 上方。松手它就归到这个分类。
     @State private var targeted = false
+    /// 刚有一条归进这个分类。翻一次触发一记成功震动。
+    @State private var landed = false
 
     var body: some View {
         Button(action: select) {
@@ -88,17 +90,23 @@ struct CategoryTabChip: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .tabChip(category.color.tint, isSelected: isSelected)
-                // 落点指示与轴上、主列行上那圈同一句话：「松手会落在这儿」。
-                .overlay(Capsule().strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2))
+                // 落点不描边：悬着时胶囊罩一层它自己的分类色 —— 与行间空位同一种
+                // 「预渲染」高亮，落进谁家就亮谁家的颜色。
+                .overlay(Capsule().fill(category.color.tint.opacity(targeted ? 0.16 : 0)))
         }
         .buttonStyle(.plain)
+        // 悬着时胶囊鼓起半档 —— tab 条上撑不开插槽，鼓起就是它的让位。
+        .scaleEffect(targeted ? 1.1 : 1)
         // 手势版的「移到分类」。只改归属：三个日子与完成状态都不变。
         // 沙漏 tab 不接落点：它不代表任何分类，没有「归到沙漏」这回事。
-        .dropDestination(for: DraggedTodo.self) { dropped, _ in
-            guard let dropped = dropped.first else { return false }
-            return store.moveTodo(dropped.id, to: category.id)
-        } isTargeted: { targeted = $0 }
-        .animation(.easeOut(duration: 0.12), value: targeted)
+        .todoDropTarget { targeted = $0 } perform: { id in
+            let ok = store.moveTodo(id, to: category.id)
+            if ok { landed.toggle() }
+            return ok
+        }
+        .dropTargetHaptic(targeted)
+        .sensoryFeedback(.success, trigger: landed)
+        .animation(.spring(duration: 0.25), value: targeted)
         .contextMenu {
             Button("重命名…") {
                 draftName = category.name
