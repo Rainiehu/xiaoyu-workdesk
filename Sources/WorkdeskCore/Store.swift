@@ -14,6 +14,28 @@ public struct PendingUndo: Identifiable, Equatable {
     /// 第一扇的倒计时不该关得掉第二扇。
     public let id = UUID()
     public let target: Target
+    /// 那一斧落下的时刻，只有删待办才有：删父连子，整棵树打的是同一个时刻。
+    /// 窗口关上时按它清扫进池子 —— 树里哪怕有谁先被单独救活（同步来的复活只救祖先链），
+    /// 剩下的也一个不漏。
+    let fellAt: Date?
+
+    init(target: Target, fellAt: Date? = nil) {
+        self.target = target
+        self.fellAt = fellAt
+    }
+}
+
+/// 同一窝兄弟的身份：同一个分类里挂在同一个父下面的那些，顶层是父为空的兄弟。
+/// 位置（`order`）只在一窝之内可比 —— 换位置、编号、播种，说范围说的都是它。
+private struct SiblingGroup: Hashable {
+    var categoryID: Category.ID
+    var parentID: TodoItem.ID?
+}
+
+extension TodoItem {
+    fileprivate var siblingGroup: SiblingGroup {
+        SiblingGroup(categoryID: categoryID, parentID: parentID)
+    }
 }
 
 @Observable
@@ -129,8 +151,8 @@ public final class Store {
     /// 一条也不缺就什么都不做 —— 这是一次性的补写，不是每次启动都重排一遍。
     private func seedOrders() {
         guard todos.contains(where: { $0.order == nil }) else { return }
-        for categoryID in Set(todos.map(\.categoryID)) {
-            renumber(categoryID, as: Self.seededOrder(todos(in: categoryID)))
+        for group in Set(todos.map(\.siblingGroup)) {
+            renumber(group, as: Self.seededOrder(todos.filter { $0.siblingGroup == group }))
         }
         saveTodos()
     }
@@ -311,8 +333,9 @@ public final class Store {
 
     /// 侧边栏徽标要的数字。派生数据一律从这里出，视图层不自己聚合。
     /// 删除态的不算 —— 占位还站在原位，但那件事已经不在「要做」的名下了。
+    /// 子待办也不算：徽标数的是**事**，一件带五步的事是一件事，不是六件。
     public var unfinishedTodoCount: Int {
-        todos.filter { !$0.done && !$0.isDeleted }.count
+        todos.filter { !$0.done && !$0.isDeleted && $0.parentID == nil }.count
     }
 
     /// 沙漏视图要的分组：所有分类中排了计划日的待办，按计划日铺成一条轴，日期升序。
@@ -330,7 +353,9 @@ public final class Store {
     public func timeline(today: Date) -> [TimelineDay] {
         var byDay: [Date: [TodoItem]] = [today.dayStart: []]
         for todo in todos {
-            guard let planned = todo.plannedOn else { continue }
+            // 轴上只有顶层：子待办是父的内部结构，没有自己的计划日，不单独占一行。
+            // （正常路径上子待办的 plannedOn 恒为空，这里再挡一道是防同步合出来的怪状态。）
+            guard let planned = todo.plannedOn, todo.parentID == nil else { continue }
             if hidesCompletedOnTimeline && todo.done { continue }
             byDay[planned.dayStart, default: []].append(todo)
         }
@@ -353,7 +378,10 @@ public final class Store {
     /// 组内的先后与分类视图左列一致（使用者自己拖出来的那个），两处看到的顺序永远是同一个。
     public var unscheduled: [UnscheduledGroup] {
         categories.compactMap { category in
-            let mine = Self.ordered(todos(in: category.id).filter { !$0.done && $0.plannedOn == nil })
+            let mine = Self.ordered(todos(in: category.id).filter {
+                // 这一列同样只有顶层：步骤不是「还没安排的事」，它跟着父走。
+                !$0.done && $0.plannedOn == nil && $0.parentID == nil
+            })
             return mine.isEmpty ? nil : UnscheduledGroup(category: category, todos: mine)
         }
     }
@@ -377,8 +405,11 @@ public final class Store {
     /// 混在一列里，靠行尾日期标签的有无自然区分。
     ///
     /// 右列按完成日从新到旧，最近的成果在最上面 —— 那是一份记录，不由人排。
+    ///
+    /// 两列铺的都只是**顶层**：归哪列只看顶层的完成状态，子待办打了勾也不迁列，
+    /// 就在父的树里原地显示为已勾；父完成了，整棵树跟着父行去右列。
     public func columns(in categoryID: Category.ID) -> CategoryColumns {
-        let mine = todos(in: categoryID)
+        let mine = todos(in: categoryID).filter { $0.parentID == nil }
         let unfinished = Self.ordered(mine.filter { !$0.done })
         // 打了勾就必然有完成日；万一数据里缺了，退回创建日 ——
         // 宁可这一条排得不准，也不让它从两列里消失。
@@ -407,10 +438,10 @@ public final class Store {
         logSyncChange { $0.recordSave(item.changeEntry) }
     }
 
-    /// 落在这个分类最上面要多小的位置。刚记下的事就在眼前，不必先滚到底去找 ——
+    /// 落在这个分类顶层最上面要多小的位置。刚记下的事就在眼前，不必先滚到底去找 ——
     /// 不满意再拖走就是。
     private func topOrder(in categoryID: Category.ID) -> Int {
-        (todos(in: categoryID).compactMap(\.order).min() ?? 0) - 1
+        (siblings(of: SiblingGroup(categoryID: categoryID, parentID: nil)).compactMap(\.order).min() ?? 0) - 1
     }
 
     /// 打勾/取消打勾。完成时刻原样落盘 —— 截到天是显示层的事，底下留着全时刻，
@@ -474,15 +505,37 @@ public final class Store {
     /// 落在新分类的最上面：这条待办在原来那个分类里的位置在新分类里没有意义，
     /// 而「刚移过去的那条」该一眼看得见。
     /// 目标就是它已经在的那个分类时什么也不发生 —— 那不是一次移动，位置也不该因此被动过。
+    ///
+    /// 只有顶层能换分类 —— 子待办的分类跟着根走，子行上本没有「移到分类」这回事。
+    /// 换的是整棵树：名下的子待办（不论几层）一并跟过去，树永远在同一个分类里。
     /// - Returns: 这一移是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
     public func moveTodo(_ id: TodoItem.ID, to categoryID: Category.ID) -> Bool {
         guard category(categoryID) != nil,
-              let item = todos.first(where: { $0.id == id }), item.categoryID != categoryID else { return false }
+              let item = todos.first(where: { $0.id == id }),
+              item.parentID == nil, item.categoryID != categoryID else { return false }
         let top = topOrder(in: categoryID)
-        return update(id) {
+        let moved = update(id) {
             $0.categoryID = categoryID
             $0.order = top
+        }
+        if moved { carryDescendants(of: id, to: categoryID) }
+        return moved
+    }
+
+    /// 整棵树换分类的后一半：把名下子孙的归属改成根的新分类（已经对的不碰）。
+    /// 各自在兄弟组里的位置不动 —— 父没换，兄弟还是那些兄弟。
+    private func carryDescendants(of id: TodoItem.ID, to categoryID: Category.ID) {
+        let carried = descendantIDs(of: id).filter { did in
+            todos.first { $0.id == did }?.categoryID != categoryID
+        }
+        guard !carried.isEmpty else { return }
+        for i in todos.indices where carried.contains(todos[i].id) {
+            todos[i].categoryID = categoryID
+        }
+        saveTodos()
+        logSyncChange { log in
+            for todo in todos where carried.contains(todo.id) { log.recordSave(todo.changeEntry) }
         }
     }
 
@@ -498,36 +551,194 @@ public final class Store {
         guard id != targetID,
               let moved = todos.first(where: { $0.id == id }),
               let target = todos.first(where: { $0.id == targetID }),
-              moved.categoryID == target.categoryID else { return false }
-        // 整个分类一起排 —— 已完成的也在这条队伍里，它们此刻在右列，但取消打勾就回到左列。
-        var queue = Self.ordered(todos(in: moved.categoryID))
+              moved.siblingGroup == target.siblingGroup else { return false }
+        // 整组兄弟一起排 —— 已完成的也在这条队伍里，它们此刻在右列，但取消打勾就回到左列。
+        var queue = Self.ordered(siblings(of: moved.siblingGroup))
         guard let from = queue.firstIndex(where: { $0.id == id }),
               let to = queue.firstIndex(where: { $0.id == targetID }) else { return false }
         queue.insert(queue.remove(at: from), at: to)
-        renumber(moved.categoryID, as: queue)
+        renumber(moved.siblingGroup, as: queue)
         saveTodos()
         return true
     }
 
-    /// 把一个分类的位置从头编一遍：交进来的顺序就是从上到下的顺序。
+    /// 把一组兄弟的位置从头编一遍：交进来的顺序就是从上到下的顺序。
     /// 每次都全编而不是插空，于是位置永远是紧挨着的一串小整数，不会越拖越挤 ——
-    /// 代价是这一编让整个分类的记录同时变脏，账上都得记（ADR-0002 的紧凑整数不动）。
-    private func renumber(_ categoryID: Category.ID, as order: [TodoItem]) {
+    /// 代价是这一编让整组兄弟的记录同时变脏，账上都得记（ADR-0002 的紧凑整数不动）。
+    private func renumber(_ group: SiblingGroup, as order: [TodoItem]) {
         let positions = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($0.element.id, $0.offset) })
-        for i in todos.indices where todos[i].categoryID == categoryID {
+        for i in todos.indices where todos[i].siblingGroup == group {
             todos[i].order = positions[todos[i].id]
         }
         logSyncChange { log in
-            for todo in todos where todo.categoryID == categoryID { log.recordSave(todo.changeEntry) }
+            for todo in todos where todo.siblingGroup == group { log.recordSave(todo.changeEntry) }
         }
+    }
+
+    // MARK: - 子待办的树
+
+    /// 一条待办的直接子待办，按兄弟间的位置从上到下 —— 三处展开的树都照这份铺。
+    /// 里头可能夹着还开着撤销窗口的删除态记录（占位靠它站在原位），与 `todos(in:)` 同一副脾气；
+    /// 数进度用 `childProgress(of:)`，它只数活人。
+    public func children(of id: TodoItem.ID) -> [TodoItem] {
+        Self.ordered(todos.filter { $0.parentID == id })
+    }
+
+    /// 父行上那个安静的进度：直接子女里勾了几个、共几个（删除态的不算数）。
+    /// 只数直接子女，不数全后代 —— 每一层只替自己的孩子说话，更深的进度展开了自然看见。
+    /// 一个孩子都没有就是 `nil`，视图层照着它决定画不画。
+    /// 勾是解耦的：孩子全勾完也不推父，「齐了、该勾父了」由人自己看出来。
+    public func childProgress(of id: TodoItem.ID) -> (done: Int, total: Int)? {
+        let kids = todos.filter { $0.parentID == id && !$0.isDeleted }
+        guard !kids.isEmpty else { return nil }
+        return (kids.filter(\.done).count, kids.count)
+    }
+
+    /// 在一条待办下面添一步。子待办生在**兄弟末尾** —— 步骤有天然先后，人是按
+    /// 1、2、3 的顺序写的，追加在尾才保得住书写顺序（顶层「新记的落最上面」为的是
+    /// 「最近的最要紧」，这里刻意不同）。归属分类跟着父；没有自己的计划日。
+    /// 父不在或在删除态就什么也不发生 —— 不给死人添孩子。
+    public func addSubTodo(_ text: String, under parentID: TodoItem.ID) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty,
+              let parent = todos.first(where: { $0.id == parentID }), !parent.isDeleted else { return }
+        let group = SiblingGroup(categoryID: parent.categoryID, parentID: parentID)
+        let item = TodoItem(
+            text: t, categoryID: parent.categoryID, parentID: parentID,
+            order: (siblings(of: group).compactMap(\.order).max() ?? -1) + 1
+        )
+        todos.append(item)
+        saveTodos()
+        logSyncChange { $0.recordSave(item.changeEntry) }
+    }
+
+    /// 入怀：把一条待办连同名下整棵子树挂到另一条下面，落在它孩子的末尾。
+    /// 拖一行落在另一行**身上**走这条路；Tab 缩进（挂到上一个兄弟下面）也从这儿过。
+    ///
+    /// 挂进怀里就离开轴：子待办没有计划日，这一挂顺手撤掉排期 —— 不是一次动了两样，
+    /// 是「步骤不单独排期」这条定义的直接推论。完成状态与三个日子里的另两个原样带着。
+    /// 挂到自己肚子里不行（目标是自己或自己的子孙），目标在删除态也不行。
+    /// - Returns: 这一挂是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
+    @discardableResult
+    public func nestTodo(_ id: TodoItem.ID, under targetID: TodoItem.ID) -> Bool {
+        guard let target = todos.first(where: { $0.id == targetID }) else { return false }
+        return relocate(id, under: targetID, in: target.categoryID, at: nil)
+    }
+
+    /// 落缝：把一条待办放到另一条的**旁边**当兄弟，落在它前头。
+    /// 拖一行落在两行之间的缝里走这条路 —— 缝在哪一层，就挂到哪一层：
+    /// 顶层两行之间的缝天然就是升级的落点，子树里的缝就是降级或换爹。
+    @discardableResult
+    public func placeTodo(_ id: TodoItem.ID, before targetID: TodoItem.ID) -> Bool {
+        place(id, at: targetID, offset: 0)
+    }
+
+    /// 同上，落在它后头 —— 一组兄弟末尾的那道缝只有「谁的后面」说得清。
+    @discardableResult
+    public func placeTodo(_ id: TodoItem.ID, after targetID: TodoItem.ID) -> Bool {
+        place(id, at: targetID, offset: 1)
+    }
+
+    private func place(_ id: TodoItem.ID, at targetID: TodoItem.ID, offset: Int) -> Bool {
+        guard id != targetID, let target = todos.first(where: { $0.id == targetID }) else { return false }
+        let queue = Self.ordered(siblings(of: target.siblingGroup)).filter { $0.id != id }
+        guard let at = queue.firstIndex(where: { $0.id == targetID }) else { return false }
+        return relocate(id, under: target.parentID, in: target.categoryID, at: at + offset)
+    }
+
+    /// Tab 那一下：挂到上一个活着的兄弟下面，成为它的末子。头一个兄弟没有「上一个」，
+    /// 什么也不发生 —— 缩不进去就是缩不进去，不发明别的去处。
+    @discardableResult
+    public func indentTodo(_ id: TodoItem.ID) -> Bool {
+        guard let item = todos.first(where: { $0.id == id }) else { return false }
+        let queue = Self.ordered(siblings(of: item.siblingGroup)).filter { !$0.isDeleted }
+        guard let i = queue.firstIndex(where: { $0.id == id }), i > 0 else { return false }
+        return nestTodo(id, under: queue[i - 1].id)
+    }
+
+    /// Shift+Tab 那一下，也是右键的「升一级」：升到父的旁边、紧跟在父后面 ——
+    /// 从哪儿钻出来就站在哪儿的边上，一眼找得着。顶层没有再往上，什么也不发生。
+    @discardableResult
+    public func promoteTodo(_ id: TodoItem.ID) -> Bool {
+        guard let item = todos.first(where: { $0.id == id }), let parentID = item.parentID else { return false }
+        return place(id, at: parentID, offset: 1)
+    }
+
+    /// 树上一切挪动的最后一站：挂到新位置（换位置、入怀、升降级、换爹说的都是这一件事）。
+    /// - Parameters:
+    ///   - newParent: 挂到谁下面，`nil` 是顶层。
+    ///   - categoryID: 落进哪个分类。有父随父（调用处已对齐），顶层由落点说了算。
+    ///   - index: 在新兄弟组里的第几位，`nil` 贴末尾。
+    private func relocate(
+        _ id: TodoItem.ID, under newParent: TodoItem.ID?, in categoryID: Category.ID, at index: Int?
+    ) -> Bool {
+        guard let item = todos.first(where: { $0.id == id }), !item.isDeleted,
+              category(categoryID) != nil else { return false }
+        if let newParent {
+            // 挂到自己肚子里会把整棵树拎离地面 —— 自己、或自己的子孙，都不接。
+            guard newParent != id, !descendantIDs(of: id).contains(newParent),
+                  let parent = todos.first(where: { $0.id == newParent }), !parent.isDeleted,
+                  parent.categoryID == categoryID else { return false }
+        }
+        let oldGroup = item.siblingGroup
+        let newGroup = SiblingGroup(categoryID: categoryID, parentID: newParent)
+        var queue = Self.ordered(siblings(of: newGroup)).filter { $0.id != id }
+        update(id) {
+            $0.parentID = newParent
+            $0.categoryID = categoryID
+            if newParent != nil { $0.plannedOn = nil }
+        }
+        if categoryID != oldGroup.categoryID { carryDescendants(of: id, to: categoryID) }
+        guard let moved = todos.first(where: { $0.id == id }) else { return false }
+        queue.insert(moved, at: min(max(index ?? queue.count, 0), queue.count))
+        renumber(newGroup, as: queue)
+        saveTodos()
+        return true
+    }
+
+    /// 名下所有子孙的 id，不含自己，一层层收。只看住在 `todos` 数组里的
+    /// （活人与还开着窗口的删除态）—— 池子里的各有各的路。
+    /// 见过环不再进（同步可能合出怪状态），于是永远收得完。
+    private func descendantIDs(of id: TodoItem.ID) -> Set<TodoItem.ID> {
+        var seen: Set<TodoItem.ID> = []
+        var frontier: Set<TodoItem.ID> = [id]
+        while !frontier.isEmpty {
+            let next = Set(
+                todos.filter { todo in
+                    guard let parent = todo.parentID else { return false }
+                    return frontier.contains(parent) && !seen.contains(todo.id) && todo.id != id
+                }.map(\.id))
+            seen.formUnion(next)
+            frontier = next
+        }
+        return seen
+    }
+
+    /// 同一窝兄弟里的成员。
+    private func siblings(of group: SiblingGroup) -> [TodoItem] {
+        todos.filter { $0.siblingGroup == group }
     }
 
     /// 删掉一条待办。删除是打记号：行留在数组原位撑着占位，窗口一关才搬进池子。
     /// 云端那头这只是一次字段更新 —— 记录不消失，见 ADR-0007。
+    ///
+    /// 删父连子：名下整棵子树一并打记号，打的是**同一个时刻** —— 一扇窗口、一起去、
+    /// 一起回。「这事不干了」天然包含它的步骤。先前已各自死掉的子孙带着各自的时刻，
+    /// 不搭这趟车，各走各的窗口。
     public func deleteTodo(_ item: TodoItem) {
         guard let i = todos.firstIndex(where: { $0.id == item.id }), !todos[i].isDeleted else { return }
-        update(item.id) { $0.deletedAt = .now }
-        openUndoWindow(.todo(item.id))
+        let fellAt = Date.now
+        let felled = ([item.id] + descendantIDs(of: item.id)).filter { id in
+            todos.first { $0.id == id }?.isDeleted == false
+        }
+        for j in todos.indices where felled.contains(todos[j].id) {
+            todos[j].deletedAt = fellAt
+        }
+        saveTodos()
+        logSyncChange { log in
+            for todo in todos where felled.contains(todo.id) { log.recordSave(todo.changeEntry) }
+        }
+        openUndoWindow(.todo(item.id), fellAt: fellAt)
     }
 
     /// 改一条待办，落盘并记账。手里那份可能是视图层拿着的旧副本，所以一律按 id 现找现改 ——
@@ -587,24 +798,75 @@ public final class Store {
     }
 
     /// 撤销一条待办的删除：摘掉记号，它原样回到原来的位置（所有字段都没动过）。
-    /// 活着的待办的分类必须活着 —— 分类若也在删除态，先把它救活，见 ADR-0007 的不变式。
+    /// 活着的待办的分类必须活着 —— 分类若也在删除态，先把它救活；
+    /// 活着的子的父也必须活着 —— 祖先链一并救，见 ADR-0007 的不变式。
+    ///
+    /// 删父连子的另一半：和它**同一时刻**倒下的整棵子树一起回来 ——
+    /// 先前各自死掉的带着各自的时刻，不搭这趟车，各归各的窗口。
     public func undeleteTodo(_ id: TodoItem.ID) {
         if let i = todos.firstIndex(where: { $0.id == id }), todos[i].isDeleted {
+            let fellAt = todos[i].deletedAt
             undeleteCategoryIfNeeded(todos[i].categoryID)
-            update(id) { $0.deletedAt = nil }
+            reviveAncestorsIfNeeded(from: todos[i].parentID)
+            let revived = ([id] + descendantIDs(of: id)).filter { rid in
+                todos.first { $0.id == rid }?.deletedAt == fellAt
+            }
+            for j in todos.indices where revived.contains(todos[j].id) {
+                todos[j].deletedAt = nil
+            }
+            saveTodos()
+            logSyncChange { log in
+                for todo in todos where revived.contains(todo.id) { log.recordSave(todo.changeEntry) }
+            }
             dismissUndoEntry(for: .todo(id))
             return
         }
         // 窗口已关、记录在池子里：本地界面到不了这儿，同步的复活走的是这条路。
+        // 只救这一条 —— 云端的复活一条记录一条记录地来，各救各的。
         guard let j = deletedTodos.firstIndex(where: { $0.id == id }) else { return }
         var item = deletedTodos.remove(at: j)
         saveDeletedTodos()
         item.deletedAt = nil
         undeleteCategoryIfNeeded(item.categoryID)
+        reviveAncestorsIfNeeded(from: item.parentID)
         let at = todos.firstIndex { $0.createdAt > item.createdAt } ?? todos.endIndex
         todos.insert(item, at: at)
         saveTodos()
         logSyncChange { $0.recordSave(item.changeEntry) }
+    }
+
+    /// 不变式的另一半：活着的子，父必须活着 —— 哪条路救活一条待办，祖先链就跟着复活。
+    /// 只救链上的节点自己，不连带它们的子树：陪祖先一起死的别的孩子没人叫它，不回来
+    /// （与「待办胜、分类复活」同一个分寸 —— 复活只救到不变式要求的最少那几个）。
+    /// 祖先的撤销窗口**不**就此关上：窗口到点照样清扫，剩在删除态里的那些一个不漏。
+    /// 见过环不再走（同步可能合出怪状态），于是永远走得完。
+    private func reviveAncestorsIfNeeded(from parentID: TodoItem.ID?) {
+        var next = parentID
+        var walked = Set<TodoItem.ID>()
+        while let id = next, walked.insert(id).inserted {
+            if let i = todos.firstIndex(where: { $0.id == id }) {
+                if todos[i].isDeleted {
+                    todos[i].deletedAt = nil
+                    saveTodos()
+                    logSyncChange { $0.recordSave(todos[i].changeEntry) }
+                }
+                undeleteCategoryIfNeeded(todos[i].categoryID)
+                next = todos[i].parentID
+            } else if let j = deletedTodos.firstIndex(where: { $0.id == id }) {
+                var item = deletedTodos.remove(at: j)
+                saveDeletedTodos()
+                item.deletedAt = nil
+                undeleteCategoryIfNeeded(item.categoryID)
+                let at = todos.firstIndex { $0.createdAt > item.createdAt } ?? todos.endIndex
+                todos.insert(item, at: at)
+                saveTodos()
+                logSyncChange { $0.recordSave(item.changeEntry) }
+                next = item.parentID
+            } else {
+                // 父根本不在本地（记录还没送到）：这儿救不了，孤儿机制管到底。
+                next = nil
+            }
+        }
     }
 
     /// 撤销一个分类的删除：摘掉记号（占位还开着），或从池子里按死时的位置插回活人堆。
@@ -661,8 +923,8 @@ public final class Store {
     }
 
     /// 开一扇撤销窗口，几秒后自己关上。窗口是会话态：不落盘，重启即全关。
-    private func openUndoWindow(_ target: PendingUndo.Target) {
-        let entry = PendingUndo(target: target)
+    private func openUndoWindow(_ target: PendingUndo.Target, fellAt: Date? = nil) {
+        let entry = PendingUndo(target: target, fellAt: fellAt)
         pendingUndos.append(entry)
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.undoWindowSeconds))
@@ -674,11 +936,16 @@ public final class Store {
     /// 内部可见只为可测 —— 测试不必真等那几秒。
     func expireUndoWindow(_ token: PendingUndo.ID) {
         guard let index = pendingUndos.firstIndex(where: { $0.id == token }) else { return }
-        let target = pendingUndos.remove(at: index).target
-        switch target {
+        let entry = pendingUndos.remove(at: index)
+        switch entry.target {
         case .todo(let id):
-            guard let i = todos.firstIndex(where: { $0.id == id }), todos[i].isDeleted else { return }
-            deletedTodos.append(todos.remove(at: i))
+            // 按那一斧的时刻清扫，不只认树根：树里可能有谁先被单独救活了
+            // （同步来的复活只救祖先链），剩下还躺着的照样一个不漏地进池子。
+            let felled = todos.filter { $0.isDeleted && ($0.id == id || $0.deletedAt == entry.fellAt) }
+            guard !felled.isEmpty else { return }
+            let felledIDs = Set(felled.map(\.id))
+            deletedTodos.append(contentsOf: felled)
+            todos.removeAll { felledIDs.contains($0.id) }
             saveTodos()
             saveDeletedTodos()
         case .category(let id):
@@ -805,6 +1072,16 @@ public final class Store {
                 localIsLater: localWroteLater(item.recordName, than: modifiedAt)
             )
         }
+        if landed.isDeleted, todos.contains(where: { child in
+            child.parentID == landed.id && !child.isDeleted
+                && syncLog.pendingSaves.contains(child.changeEntry)
+        }) {
+            // 这台往树里加子（或改子）、那台删父 —— 子胜，父复活，与「待办胜、分类复活」
+            // 同一条不变式。只看本地还欠着账的孩子：不欠账而暂时活着的，多半是它自己的
+            // 删除记录还在路上，不该拿来翻案。复活是本地的表态，记账推回云端。
+            landed.deletedAt = nil
+            logSyncChange { $0.recordSave(landed.changeEntry) }
+        }
         if landed.isDeleted {
             if pendingUndos.contains(where: { $0.target == .todo(item.id) }),
                let i = todos.firstIndex(where: { $0.id == item.id }) {
@@ -823,6 +1100,17 @@ public final class Store {
                     return
                 }
             }
+            if let parentID = landed.parentID {
+                guard todos.contains(where: { $0.id == parentID })
+                        || deletedTodos.contains(where: { $0.id == parentID }) else {
+                    // 父的记录还没送到 —— 与分类同一个待遇：先候着，父一落地就跟着落。
+                    stashOrphan(landed)
+                    return
+                }
+                // 活着的子要有活着的父：父在本地是删除态，就是「删父」对上了「改子」——
+                // 子胜，祖先链复活。
+                reviveAncestorsIfNeeded(from: parentID)
+            }
             deletedTodos.removeAll { $0.id == item.id }
             saveDeletedTodos()
             dismissUndoEntry(for: .todo(item.id))
@@ -834,6 +1122,8 @@ public final class Store {
                 let at = todos.firstIndex { $0.createdAt > landed.createdAt } ?? todos.endIndex
                 todos.insert(landed, at: at)
             }
+            healTreeShape(around: landed.id)
+            adoptOrphans(childrenOf: landed.id)
         }
         saveTodos()
         // 影子对齐到云端此刻的样子 —— 合并后本地多出的那些改动还挂在账上，
@@ -990,6 +1280,45 @@ public final class Store {
         orphanTodos.removeAll { $0.categoryID == categoryID }
         saveOrphans()
         for item in adoptable { applyRemoteTodo(item) }
+    }
+
+    /// 父落地了，把候着的它名下的孩子接回来 —— 与分类接孤儿同一条路。
+    /// 一层接一层：孩子落了地，孙辈的候着的跟着这条路再落。
+    private func adoptOrphans(childrenOf parentID: TodoItem.ID) {
+        let adoptable = orphanTodos.filter { $0.parentID == parentID }
+        guard !adoptable.isEmpty else { return }
+        orphanTodos.removeAll { $0.parentID == parentID }
+        saveOrphans()
+        for item in adoptable { applyRemoteTodo(item) }
+    }
+
+    /// 同步落地后把树修圆。字段级合并对的是单条记录，跨记录的形状只能事后看一眼：
+    /// 两台各把对方挂进自己怀里会合出一个**环**，断在刚落地的这条 —— 升它到顶层；
+    /// 树的**分类**永远跟着根走 —— 子随父正，再把自己名下的正过来。
+    /// 修补是本地的表态，记账推回云端；两台各修各的，修出来是同一个形状。
+    private func healTreeShape(around id: TodoItem.ID) {
+        var walked: Set<TodoItem.ID> = []
+        var next = todos.first(where: { $0.id == id })?.parentID
+        while let n = next {
+            guard n != id, walked.insert(n).inserted else {
+                if let i = todos.firstIndex(where: { $0.id == id }) {
+                    todos[i].parentID = nil
+                    logSyncChange { $0.recordSave(todos[i].changeEntry) }
+                }
+                break
+            }
+            next = (todos.first { $0.id == n } ?? deletedTodos.first { $0.id == n })?.parentID
+        }
+        guard let item = todos.first(where: { $0.id == id }) else { return }
+        var expected = item.categoryID
+        if let parentID = item.parentID,
+           let parent = todos.first(where: { $0.id == parentID })
+            ?? deletedTodos.first(where: { $0.id == parentID }),
+           parent.categoryID != expected {
+            expected = parent.categoryID
+            update(id) { $0.categoryID = expected }
+        }
+        carryDescendants(of: id, to: expected)
     }
 
     /// 保存送达云端，销账。

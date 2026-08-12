@@ -75,6 +75,8 @@ extension TodoItem {
         // 对分类的引用按 id 存字符串，不用 CKRecord.Reference —— 级联删除是它唯一的
         // 增值，而分类删除的裁决是 #36 的事，这里不让服务端替我们裁。
         record["categoryID"] = categoryID.uuidString
+        // 对父待办的引用同一个道理：删父连子的裁决在 Store，不让服务端级联。
+        record["parentID"] = parentID?.uuidString
         record["done"] = done
         record["createdAt"] = createdAt
         record["completedAt"] = completedAt
@@ -97,6 +99,7 @@ extension TodoItem {
             id: id,
             text: text,
             categoryID: categoryID,
+            parentID: (record["parentID"] as? String).flatMap(UUID.init(uuidString:)),
             done: record["done"] as? Bool ?? false,
             createdAt: record["createdAt"] as? Date ?? .now,
             completedAt: record["completedAt"] as? Date,

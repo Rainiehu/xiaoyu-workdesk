@@ -62,7 +62,12 @@ public struct TodoItem: Identifiable, Codable, Equatable {
     public var id = UUID()
     public var text: String
     /// 所属分类。每条待办属于且只属于一个分类。
+    /// 子待办的这个值跟着根走 —— 整棵树永远在同一个分类里，`Store` 保证。
     public var categoryID: Category.ID
+    /// 挂在哪条待办下面。`nil` 就是顶层。子待办是父待办的**内部结构**（拆出来的步骤）：
+    /// 没有自己的计划日、不上沙漏轴、不进未排期列，只在父行展开时露面。
+    /// 层级任意深 —— 子待办自己也可以再拆。
+    public var parentID: TodoItem.ID?
     public var done: Bool = false
     /// 创建时刻。带着时刻落盘 —— 同一天记下的几条待办要靠它分出先后。
     public var createdAt: Date = .now
@@ -71,8 +76,9 @@ public struct TodoItem: Identifiable, Codable, Equatable {
     /// 安排去做的那一天。可空 —— 「总得做但不急」的事可以永远不排期。
     /// 与创建日、完成日各自独立存储，谁都不会覆盖谁。
     public var plannedOn: Date?
-    /// 在所属分类里的位置，数越小越靠上 —— 分类视图左列照着它铺，见 ADR-0002。
-    /// 只在同一个分类里可比，跨分类比大小没有意义。
+    /// 在兄弟之间的位置，数越小越靠上 —— 分类视图左列照着它铺，见 ADR-0002。
+    /// 兄弟指同一个分类里挂在同一个父下的那些（顶层是父为空的兄弟），
+    /// 只在兄弟之间可比，跨分类、跨父比大小没有意义。
     ///
     /// 可空只是为了读得进还没有这个字段的旧数据：`Store` 载入时会照老规矩给缺的补上，
     /// 补完之后每条都有。别把「没有位置」当成一种状态来用。
@@ -82,13 +88,15 @@ public struct TodoItem: Identifiable, Codable, Equatable {
     public var deletedAt: Date?
 
     public init(
-        id: UUID = UUID(), text: String, categoryID: Category.ID, done: Bool = false,
+        id: UUID = UUID(), text: String, categoryID: Category.ID, parentID: TodoItem.ID? = nil,
+        done: Bool = false,
         createdAt: Date = .now, completedAt: Date? = nil, plannedOn: Date? = nil, order: Int? = nil,
         deletedAt: Date? = nil
     ) {
         self.id = id
         self.text = text
         self.categoryID = categoryID
+        self.parentID = parentID
         self.done = done
         self.createdAt = createdAt
         self.completedAt = completedAt

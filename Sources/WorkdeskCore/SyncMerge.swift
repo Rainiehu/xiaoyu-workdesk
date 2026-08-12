@@ -10,7 +10,8 @@ import Foundation
 /// 就是两台设备各动一样时两样都保得住。
 enum SyncMerge {
     /// 合并一条待办。方面：正文、完成（打勾 + 完成时刻）、计划日、
-    /// 归属与位置（换分类必带新位置，位置也只在所属分类里才有意义）、创建时刻、删除记号。
+    /// 挂靠与位置（分类 + 父 + 第几位 —— 「挂在哪儿」是一件事，位置也只在兄弟之间才有意义）、
+    /// 创建时刻、删除记号。
     /// 删除不是特例（「删除胜」已随 ADR-0007 退役）：这台删、那台改字，两边都保住 ——
     /// 合出来是一条带着新改的字、躺在删除态里的记录；两台都动记号，后写的算。
     static func todo(shadow: TodoItem?, local: TodoItem, remote: TodoItem, localIsLater: Bool) -> TodoItem {
@@ -65,9 +66,12 @@ private struct Completion: Equatable {
     var completedAt: Date?
 }
 
-/// 归属与位置捆成一个方面：「在哪个分类的第几位」是一件事。
+/// 挂靠与位置捆成一个方面：「挂在哪个分类、哪个父下面的第几位」是一件事 ——
+/// 升降级、换爹、换分类、换位置，本地都是这一个方面的一次改动，拆开会合出
+/// 「挂着 A 的父却在 B 的分类里」这种谁也没写过的状态。
 private struct Placement: Equatable {
     var categoryID: Category.ID
+    var parentID: TodoItem.ID?
     var order: Int?
 }
 
@@ -81,9 +85,10 @@ private extension TodoItem {
     }
 
     var placement: Placement {
-        get { Placement(categoryID: categoryID, order: order) }
+        get { Placement(categoryID: categoryID, parentID: parentID, order: order) }
         set {
             categoryID = newValue.categoryID
+            parentID = newValue.parentID
             order = newValue.order
         }
     }
