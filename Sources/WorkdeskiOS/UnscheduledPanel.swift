@@ -44,6 +44,7 @@ struct UnscheduledPanel: View {
 /// 面板里的一组：一个分类的彩色胶囊当组头，下面是它名下还没排期的待办。
 /// 组头是这个面板里唯一着色的 tag —— 一组的颜色就是这一组的标题。
 private struct UnscheduledGroupView: View {
+    @Environment(Store.self) private var store
     let group: UnscheduledGroup
 
     var body: some View {
@@ -58,6 +59,11 @@ private struct UnscheduledGroupView: View {
                         .font(.callout)
                 } else {
                     UnscheduledRow(todo: todo, tint: group.category.color.tint)
+                    // 展开的子树就挂在行底下 —— 面板也不例外，窄列的树跟着用 callout。
+                    if store.isExpanded(todo.id) {
+                        SubTodoTree(parentID: todo.id, tint: group.category.color.tint)
+                            .font(.callout)
+                    }
                 }
             }
         }
@@ -82,6 +88,8 @@ private struct UnscheduledRow: View {
 
             TodoText(todo: todo, editing: $editing)
                 .font(.callout)
+
+            TodoTreeBadge(todo: todo)
 
             Spacer(minLength: 8)
 

@@ -44,6 +44,10 @@ struct CategoryScreen: View {
                         DeletedTodoRow(todo: todo)
                     } else {
                         CategoryRow(todo: todo, tint: category.color.tint)
+                        // 展开的子树就挂在行底下 —— 三处父行都能展开，与 Mac 同一条规矩。
+                        if store.isExpanded(todo.id) {
+                            SubTodoTree(parentID: todo.id, tint: category.color.tint)
+                        }
                     }
                 }
             }
@@ -114,6 +118,8 @@ private struct CategoryRow: View {
             }
 
             TodoText(todo: todo, editing: $editing)
+
+            TodoTreeBadge(todo: todo)
 
             Spacer(minLength: 8)
 

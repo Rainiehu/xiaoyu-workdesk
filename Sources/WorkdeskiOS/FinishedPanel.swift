@@ -30,6 +30,11 @@ struct FinishedPanel: View {
                                     .font(.callout)
                             } else {
                                 FinishedRow(todo: todo, tint: category.color.tint, today: clock.today)
+                                // 完成的事带着它的步骤一起退到背景里 —— 展开照样看得全。
+                                if store.isExpanded(todo.id) {
+                                    SubTodoTree(parentID: todo.id, tint: category.color.tint)
+                                        .font(.callout)
+                                }
                             }
                         }
                     }
@@ -64,6 +69,8 @@ private struct FinishedRow: View {
 
             TodoText(todo: todo, editing: $editing)
                 .font(.callout)
+
+            TodoTreeBadge(todo: todo)
 
             Spacer(minLength: 8)
 

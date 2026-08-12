@@ -151,6 +151,10 @@ private struct DayGroup: View {
                     DeletedTodoRow(todo: todo)
                 } else {
                     TimelineRow(todo: todo, today: today)
+                    // 展开的子树就挂在行底下 —— 轴上也不例外，圈随轴取青。
+                    if store.isExpanded(todo.id) {
+                        SubTodoTree(parentID: todo.id, tint: .teal)
+                    }
                 }
             }
             if isToday && day.todos.isEmpty {
@@ -218,6 +222,8 @@ private struct TimelineRow: View {
 
             TodoText(todo: todo, editing: $editing)
                 .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+
+            TodoTreeBadge(todo: todo)
 
             Spacer(minLength: 8)
 
