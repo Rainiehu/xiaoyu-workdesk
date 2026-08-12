@@ -187,6 +187,9 @@ struct Preferences: Codable, Equatable {
     var recordingCategoryID: Category.ID?
     /// 沙漏轴那只眼闭着（不展示已完成）。老文件没有这个键，读出来是 `nil`，按睁眼算。
     var hidesCompletedOnTimeline: Bool?
+    /// 展开着子树的那些待办。展开是「怎么看」的习惯，不是数据 —— 本地各记各的，
+    /// 三处的行共享同一份：在轴上展开的树，切到分类视图它也开着。
+    var expandedTodoIDs: [UUID]?
 }
 
 public struct FavoriteItem: Identifiable, Codable, Equatable {

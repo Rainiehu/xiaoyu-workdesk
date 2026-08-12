@@ -66,6 +66,7 @@ struct UnscheduledColumn: View {
 /// 组头是这一列里唯一着色的 tag：一组的颜色就是这一组的标题，一屏只有几个。
 /// 轴上每行那副同形状但不着色 —— 见 `CategoryTag`。
 private struct UnscheduledCategoryGroup: View {
+    @Environment(Store.self) private var store
     let group: UnscheduledGroup
 
     var body: some View {
@@ -81,6 +82,12 @@ private struct UnscheduledCategoryGroup: View {
                         .font(.callout)
                 } else {
                     UnscheduledRow(todo: todo, tint: group.category.color.tint)
+                    // 展开的子树就挂在行底下 —— 三处父行都能展开，这一列也不例外。
+                    // 窄列的字号：树跟着这一列用 callout。
+                    if store.isExpanded(todo.id) {
+                        SubTodoTree(parentID: todo.id, tint: group.category.color.tint)
+                            .font(.callout)
+                    }
                 }
             }
         }
@@ -120,6 +127,8 @@ private struct UnscheduledRow: View {
             TodoText(todo: todo, editing: $editing)
                 .font(.callout)
 
+            TodoTreeBadge(todo: todo)
+
             Spacer(minLength: 8)
 
             PlannedDayControl(todo: todo, rowHovering: hovering)
@@ -137,6 +146,8 @@ private struct UnscheduledRow: View {
         .draggable(DraggedTodo(id: todo.id)) {
             TodoDragPreview(text: todo.text, tint: tint)
         }
+        // 落间换位、落身入怀：组内的顺序与分类视图左列是同一份，缝也照样接。
+        .todoTreeDropTarget(todo, allowsGaps: true)
     }
 
     /// 打勾：圈先亮起来，过一拍这条才真的记成完成、跟着淡出这一列。

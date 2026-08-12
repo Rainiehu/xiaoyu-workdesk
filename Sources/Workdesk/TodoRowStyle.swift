@@ -158,6 +158,11 @@ struct TodoText: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
     @Binding var editing: TodoEditing
+    /// 改写中按下 Tab / Shift+Tab 时做什么 —— 缩进（挂到上一个兄弟下面）与升一级。
+    /// 只在兄弟看得见的地方接（分类视图左列、树里）：轴上挂到一个看不见的邻居名下，
+    /// 那一行就凭空消失了，所以那两处不传，Tab 留给系统走焦点。
+    var onIndent: (() -> Void)?
+    var onOutdent: (() -> Void)?
 
     @FocusState private var focused: Bool
 
@@ -172,6 +177,15 @@ struct TodoText: View {
                 // 点到别处去了也算改完 —— 一次改写没有「没保存」这个下场。
                 .onChange(of: focused) { _, focused in if !focused { commit() } }
                 .onAppear { focused = true }
+                // Tab 缩进、Shift+Tab 升一级：先把改到一半的字收下（挪位置不丢字），
+                // 再挪。光标的接力见 `TreeComposer.resumeEditingID`。
+                .onKeyPress(keys: [.tab], phases: .down) { press in
+                    let move = press.modifiers.contains(.shift) ? onOutdent : onIndent
+                    guard let move else { return .ignored }
+                    commit()
+                    move()
+                    return .handled
+                }
         } else {
             Text(todo.text)
                 .multilineTextAlignment(.leading)
@@ -209,16 +223,39 @@ struct TodoMoveMenu: View {
     }
 }
 
+/// 右键菜单里的那几项。做成独立的 View 才拿得到环境里的 `Store` 与 `TreeComposer` ——
+/// 菜单项按行的身份自己增减：顶层行有「移到分类」，子行换成「升一级」（子行的分类跟着根走，
+/// 没有「移到分类」这回事）；「添加子待办」谁都有 —— 任何一行都拆得出步骤。
+struct TodoRowMenuItems: View {
+    @Environment(Store.self) private var store
+    @Environment(TreeComposer.self) private var composer
+    let todo: TodoItem
+    @Binding var editing: TodoEditing
+
+    var body: some View {
+        Button("改写") { editing.begin(todo) }
+        Button("添加子待办") {
+            // 当场展开并把追加输入摆到手边 —— 加的那步得看得见、接着写。
+            store.expand(todo.id)
+            composer.composingUnder = todo.id
+        }
+        if todo.parentID != nil {
+            Button("升一级") { withAnimation { _ = store.promoteTodo(todo.id) } }
+        } else {
+            TodoMoveMenu(todo: todo)
+        }
+    }
+}
+
 extension View {
-    /// 行上那两个编辑入口：单击整行进就地改写，右键是同样这两件事的菜单。
-    /// 三处一模一样 —— 一行待办能做什么，不看它在哪一列，见 ADR-0003。
+    /// 行上那两个编辑入口：单击整行进就地改写，右键是菜单（改写、添加子待办、
+    /// 移到分类/升一级）。三处一模一样 —— 一行待办能做什么，不看它在哪一列，见 ADR-0003。
     ///
     /// 单击接的是整行，不只是正文那几个字：行里的圈、日期、删除都是按钮，各自先接住自己的那一下，
     /// 不会落到这儿来。所以要摆在 `contentShape` 之后、`draggable` 之前，与整行抓得动那件事排好先后。
     func todoRowEditing(_ todo: TodoItem, editing: Binding<TodoEditing>) -> some View {
         contextMenu {
-            Button("改写") { editing.wrappedValue.begin(todo) }
-            TodoMoveMenu(todo: todo)
+            TodoRowMenuItems(todo: todo, editing: editing)
         }
         .onTapGesture {
             if !editing.wrappedValue.active { editing.wrappedValue.begin(todo) }

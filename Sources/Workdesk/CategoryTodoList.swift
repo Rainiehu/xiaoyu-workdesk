@@ -83,6 +83,11 @@ struct CategoryTodoList: View {
                         DeletedTodoRow(todo: todo)
                     } else {
                         TodoRow(todo: todo, tint: category.color.tint)
+                        // 展开的子树就挂在行底下。右列也一样 —— 三处父行都能展开，
+                        // 完成的事带着它的步骤一起退到背景里。
+                        if store.isExpanded(todo.id) {
+                            SubTodoTree(parentID: todo.id, tint: category.color.tint)
+                        }
                     }
                 }
             }
@@ -146,6 +151,7 @@ struct CategoryTodoList: View {
 private struct TodoRow: View {
     @Environment(Store.self) private var store
     @Environment(TodayClock.self) private var clock
+    @Environment(TreeComposer.self) private var composer
     let todo: TodoItem
     let tint: Color
     @State private var hovering = false
@@ -154,10 +160,8 @@ private struct TodoRow: View {
     /// 手正放在字上，旁边不该还浮着一个删除。
     @State private var editing = TodoEditing()
 
-    /// 有另一行正悬在这一行上方。松手它就落到这一行的位置上。
-    @State private var targeted = false
-
     /// 左列的行才排得动 —— 右列的顺序是完成日，不由人排，见 ADR-0002。
+    /// 落缝（换位置）与 Tab 缩进（挂到上一个兄弟名下）都只在排得动的列里成立。
     private var reorderable: Bool { !todo.done }
 
     var body: some View {
@@ -166,7 +170,15 @@ private struct TodoRow: View {
                 store.toggleTodo(todo)
             }
 
-            TodoText(todo: todo, editing: $editing)
+            TodoText(
+                todo: todo, editing: $editing,
+                onIndent: reorderable
+                    ? { if store.indentTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil,
+                onOutdent: reorderable
+                    ? { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil
+            )
+
+            TodoTreeBadge(todo: todo)
 
             Spacer(minLength: 8)
 
@@ -188,23 +200,22 @@ private struct TodoRow: View {
             }
         }
         .todoRowChrome(hovering: hovering)
-        // 落点指示与 tab 栏、沙漏视图里那圈一样是青色描边：「松手会落在这儿」三处是同一句话。
-        .overlay(
-            RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius)
-                .strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2)
-        )
         .onHover { hovering = $0 }
         // 整行都抓得动，内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         // 已完成的也抓得动 —— 它排不了序，但照样可以拖到 tab 栏上换分类。
         .contentShape(Rectangle())
         .todoRowEditing(todo, editing: $editing)
         .draggable(DraggedTodo(id: todo.id)) { TodoDragPreview(text: todo.text, tint: tint) }
-        .dropDestination(for: DraggedTodo.self) { dropped, _ in
-            // 一次拖一条 —— 这列没有多选，落下的就只会是刚才抓起的那一行。
-            guard reorderable, let dropped = dropped.first else { return false }
-            return store.reorderTodo(dropped.id, onto: todo.id)
-        } isTargeted: { targeted = reorderable && $0 }
-        .animation(.easeOut(duration: 0.12), value: targeted)
+        // 落间换位、落身入怀：缝亮线、身亮圈。右列不接缝 —— 那儿的顺序不由人排，
+        // 行上只剩「入怀」一件事。
+        .todoTreeDropTarget(todo, allowsGaps: reorderable)
+        .onAppear {
+            // Tab/Shift+Tab 挪完位置的那一行在这儿续上改写 —— 见 `TreeComposer.resumeEditingID`。
+            if composer.resumeEditingID == todo.id {
+                composer.resumeEditingID = nil
+                editing.begin(todo)
+            }
+        }
     }
 
 }

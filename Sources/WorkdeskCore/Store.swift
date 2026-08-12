@@ -72,6 +72,10 @@ public final class Store {
     /// 这是「怎么看」的习惯，不是数据 —— 随偏好落盘、不进同步，两台机器各看各的。
     public private(set) var hidesCompletedOnTimeline = false
 
+    /// 展开着子树的那些待办。与那只眼同一个待遇：习惯不是数据，随偏好落盘、不进同步。
+    /// 三处的行共享这一份 —— 在轴上展开的树，切到分类视图它也开着。
+    public private(set) var expandedTodoIDs: Set<TodoItem.ID> = []
+
     /// 同步的账本：本地增删改先记账，云端慢慢结清。待办、分类与收藏都记在这一本上。
     /// 没有同步引擎的构建里它照记不误 —— 账不会丢，哪天引擎接上了照账补发。
     public private(set) var syncLog = SyncChangeLog()
@@ -113,6 +117,7 @@ public final class Store {
         let preferences: Preferences? = load(Self.preferencesFile)
         chosenRecordingCategoryID = preferences?.recordingCategoryID
         hidesCompletedOnTimeline = preferences?.hidesCompletedOnTimeline ?? false
+        expandedTodoIDs = Set(preferences?.expandedTodoIDs ?? [])
         sweepInterruptedDeletions()
         seedOrders()
     }
@@ -367,6 +372,28 @@ public final class Store {
     /// 拨一下沙漏轴的那只眼：睁 ↔ 闭。选择跨重启保留，与记事分类同一份偏好文件。
     public func toggleHidesCompletedOnTimeline() {
         hidesCompletedOnTimeline.toggle()
+        savePreferences()
+    }
+
+    /// 这条待办的子树展开着吗。默认收起 —— 轴上一屏几十行，不该因为谁有步骤就成了一片树。
+    public func isExpanded(_ id: TodoItem.ID) -> Bool {
+        expandedTodoIDs.contains(id)
+    }
+
+    /// 拨一下展开/收起。选择跨重启保留，三处共享。
+    public func toggleExpanded(_ id: TodoItem.ID) {
+        if expandedTodoIDs.contains(id) {
+            expandedTodoIDs.remove(id)
+        } else {
+            expandedTodoIDs.insert(id)
+        }
+        savePreferences()
+    }
+
+    /// 把这条待办展开（已开着就什么也不做）。「添加子待办」用它 —— 加的那步得当场看得见。
+    public func expand(_ id: TodoItem.ID) {
+        guard !expandedTodoIDs.contains(id) else { return }
+        expandedTodoIDs.insert(id)
         savePreferences()
     }
 
@@ -1512,7 +1539,8 @@ public final class Store {
     private func savePreferences() {
         save(Preferences(
             recordingCategoryID: chosenRecordingCategoryID,
-            hidesCompletedOnTimeline: hidesCompletedOnTimeline
+            hidesCompletedOnTimeline: hidesCompletedOnTimeline,
+            expandedTodoIDs: expandedTodoIDs.sorted { $0.uuidString < $1.uuidString }
         ), to: Self.preferencesFile)
     }
 

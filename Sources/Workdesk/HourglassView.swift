@@ -243,6 +243,11 @@ private struct DayGroup: View {
                     DeletedTodoRow(todo: todo)
                 } else {
                     TimelineRow(todo: todo, today: today)
+                    // 展开的子树就挂在行底下 —— 三处父行都能展开，轴上也不例外。
+                    // 圈的颜色随轴的规矩取青：一屏该抢眼的是「今天」，不是每一棵树。
+                    if store.isExpanded(todo.id) {
+                        SubTodoTree(parentID: todo.id, tint: .teal)
+                    }
                 }
             }
             // 空着也照样成组的只有今天，所以这句话只属于今天 —— 别的日子没有待办就根本不成组。
@@ -326,6 +331,8 @@ private struct TimelineRow: View {
             TodoText(todo: todo, editing: $editing)
                 .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
 
+            TodoTreeBadge(todo: todo)
+
             Spacer(minLength: 8)
 
             // 排期入口只有图标，不带常驻日期标签：这一行就躺在它计划日的分组底下，
@@ -352,6 +359,9 @@ private struct TimelineRow: View {
         .draggable(DraggedTodo(id: todo.id)) {
             TodoDragPreview(text: todo.text, tint: tint)
         }
+        // 轴上的行不接缝：这条轴的顺序不由人排，行身只有「入怀」一件事 ——
+        // 改期落在组的任何别处（组头、行距、留白），照旧由整组接住。
+        .todoTreeDropTarget(todo, allowsGaps: false)
     }
 }
 
