@@ -177,6 +177,8 @@ public struct TimelineDay: Identifiable, Equatable {
 struct Preferences: Codable, Equatable {
     /// 沙漏视图记事时上次选中的分类。还没选过就是 `nil`。
     var recordingCategoryID: Category.ID?
+    /// 沙漏轴那只眼闭着（不展示已完成）。老文件没有这个键，读出来是 `nil`，按睁眼算。
+    var hidesCompletedOnTimeline: Bool?
 }
 
 public struct FavoriteItem: Identifiable, Codable, Equatable {

@@ -46,6 +46,10 @@ public final class Store {
     /// 上次选来记事的分类。可能指向一个已经不在了的分类 —— 对外的 `recordingCategory` 管这件事。
     private var chosenRecordingCategoryID: Category.ID?
 
+    /// 沙漏轴那只眼闭着：已完成的不进 `timeline(today:)` 的分组。
+    /// 这是「怎么看」的习惯，不是数据 —— 随偏好落盘、不进同步，两台机器各看各的。
+    public private(set) var hidesCompletedOnTimeline = false
+
     /// 同步的账本：本地增删改先记账，云端慢慢结清。待办、分类与收藏都记在这一本上。
     /// 没有同步引擎的构建里它照记不误 —— 账不会丢，哪天引擎接上了照账补发。
     public private(set) var syncLog = SyncChangeLog()
@@ -84,7 +88,9 @@ public final class Store {
         syncLog = load(Self.syncLogFile) ?? SyncChangeLog()
         syncShadows = load(Self.shadowsFile) ?? SyncShadows()
         orphanTodos = load(Self.orphansFile) ?? []
-        chosenRecordingCategoryID = (load(Self.preferencesFile) as Preferences?)?.recordingCategoryID
+        let preferences: Preferences? = load(Self.preferencesFile)
+        chosenRecordingCategoryID = preferences?.recordingCategoryID
+        hidesCompletedOnTimeline = preferences?.hidesCompletedOnTimeline ?? false
         sweepInterruptedDeletions()
         seedOrders()
     }
@@ -315,17 +321,28 @@ public final class Store {
     ///
     /// 已完成的待办落在它的**计划日**，不是完成日：打勾不会让条目跳到别的日期去。
     /// 计划日在过去而未完成的待办也只是留在它那一天，这里不给它任何特殊位置，见 ADR-0001。
+    ///
+    /// 那只眼闭着（`hidesCompletedOnTimeline`）时已完成的一概不进组，没有哪一天是例外 ——
+    /// 含删除态的占位：它闭眼前就没显示，占位凭空冒出来才怪。整天都做完的日子
+    /// 于是不成组，过去段随之收短。
     /// - Parameter today: 「今天」是哪天。刻意没有默认值 —— 由调用方交进来，
     ///   分组因此既可测，也不会有哪一处偷偷去问一次时钟。
     public func timeline(today: Date) -> [TimelineDay] {
         var byDay: [Date: [TodoItem]] = [today.dayStart: []]
         for todo in todos {
             guard let planned = todo.plannedOn else { continue }
+            if hidesCompletedOnTimeline && todo.done { continue }
             byDay[planned.dayStart, default: []].append(todo)
         }
         return byDay
             .sorted { $0.key < $1.key }
             .map { TimelineDay(day: $0.key, todos: $0.value) }
+    }
+
+    /// 拨一下沙漏轴的那只眼：睁 ↔ 闭。选择跨重启保留，与记事分类同一份偏好文件。
+    public func toggleHidesCompletedOnTimeline() {
+        hidesCompletedOnTimeline.toggle()
+        savePreferences()
     }
 
     /// 沙漏视图右列要的分组：还没排期的未完成待办，按分类分开，分类的顺序就是 tab 栏上的顺序。
@@ -1151,7 +1168,10 @@ public final class Store {
     private func saveShadows() { save(syncShadows, to: Self.shadowsFile) }
 
     private func savePreferences() {
-        save(Preferences(recordingCategoryID: chosenRecordingCategoryID), to: Self.preferencesFile)
+        save(Preferences(
+            recordingCategoryID: chosenRecordingCategoryID,
+            hidesCompletedOnTimeline: hidesCompletedOnTimeline
+        ), to: Self.preferencesFile)
     }
 
     private func load<T: Decodable>(_ name: String) -> T? {

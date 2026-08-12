@@ -59,6 +59,13 @@ struct HourglassView: View {
                         .frame(maxWidth: .infinity)
                 }
                 timeline(today: today)
+                    // 那只眼浮在轴滚动区的右上角：它管的就是这片内容，站在这片内容的角上。
+                    // 输入区说「记到哪」、tab 栏说「去哪儿」，谁也不该收留一个「怎么看」的开关。
+                    .overlay(alignment: .topTrailing) {
+                        TimelineEyeToggle()
+                            .padding(.top, 10)
+                            .padding(.trailing, 18)
+                    }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // 未排期的事单开一列，与轴分开滚：一边是「排在哪天」，一边是「还没安排」。
@@ -75,6 +82,7 @@ struct HourglassView: View {
         // 但只垫差的那一截（`endInsets`）：过去往往早超过半屏，顶上就一点不垫，
         // 滚到头就是最早那一天，而不是半屏说不清的空白。真垫了余白的时候（今天自己
         // 就是轴的尽头），那段空白是有含义的：滚到底，中线上正锚着今天。
+        // 内容不满一屏是例外：一点不垫，从顶排下来 —— 那时没有滚动可言，见 `endInsets`。
         GeometryReader { geo in
             let insets = endInsets(half: geo.size.height / 2)
             ScrollView {
@@ -128,10 +136,14 @@ struct HourglassView: View {
     /// 够了的一侧一点不垫 —— `scrollTo(anchor: .center)` 只在目标两边都还有内容可滚时
     /// 才居得了中，这两段垫的就是「可滚」的下限。还没量出今天在哪之前先按半屏垫着
     /// （等于从前的行为），量到了再收 —— 所以这里的空白只会少、不会多。
+    ///
+    /// 内容不满一屏时一点不垫，从顶排下来：那时一眼看得全，「今天在中线」换来的
+    /// 只是头顶一段没来由的空白。满了一屏才有滚动可言，锚定才值得垫。
     private func endInsets(half: CGFloat) -> (top: CGFloat, bottom: CGFloat) {
         guard let center = todayCenterY, let height = contentHeight else {
             return (half, half)
         }
+        guard height > half * 2 else { return (0, 0) }
         return (max(0, half - center), max(0, half - (height - center)))
     }
 
@@ -306,7 +318,9 @@ private struct TimelineRow: View {
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
             TodoToggle(done: todo.done, overdue: todo.isOverdue(today: today), tint: tint) {
-                store.toggleTodo(todo)
+                // 带动画：那只眼闭着时，勾下去这一行就随动画淡出 —— 开关说不看已完成，
+                // 打完勾的当场就走，全完成的日子连组一起收。睁着时这下动画只动样式，无妨。
+                withAnimation(.easeOut(duration: 0.2)) { store.toggleTodo(todo) }
             }
 
             TodoText(todo: todo, editing: $editing)
@@ -373,5 +387,90 @@ extension View {
             .padding(.vertical, 2)
             .background(Capsule().fill(tint.chipFill))
             .overlay(Capsule().stroke(tint.chipStroke, lineWidth: 1))
+    }
+}
+
+// MARK: - 轴右上角的那只眼
+
+/// 睁着 = 已完成都在；闭上 = 眼不见为净。点一下翻面，全轴生效、没有哪一天是例外；
+/// 选择由 `Store` 记着、本地各记各的 —— 这是「怎么看」的习惯，不是数据。
+///
+/// SF Symbols 只有 eye / eye.slash、没有闭眼，所以两副形态都自绘：同一条轮廓
+/// 在睁闭之间连续变形，拨那一下是一次真的眨眼，不是两张图的硬切。
+/// 灰调、垫一层薄材质底 —— 行从它底下滚过时压得住，又不与「今天」抢戏。
+private struct TimelineEyeToggle: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        let hidden = store.hidesCompletedOnTimeline
+        Button {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                store.toggleHidesCompletedOnTimeline()
+            }
+        } label: {
+            ZStack {
+                EyeLids(openness: hidden ? 0 : 1)
+                    .stroke(.secondary, style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
+                // 瞳孔与睫毛不参与变形，随睁闭各自淡入淡出 —— 眨到一半的眼里
+                // 既不该有整颗瞳孔，也不该已经长出睫毛。
+                Circle()
+                    .fill(.secondary)
+                    .frame(width: 4, height: 4)
+                    .opacity(hidden ? 0 : 1)
+                EyeLashes()
+                    .stroke(.secondary, style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
+                    .opacity(hidden ? 1 : 0)
+            }
+            .frame(width: 15, height: 15)
+            .frame(width: 24, height: 24)
+            .background(.ultraThinMaterial, in: Circle())
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(hidden ? "显示已完成" : "隐藏已完成")
+        .accessibilityLabel(hidden ? "显示已完成" : "隐藏已完成")
+    }
+}
+
+/// 眼睑的轮廓：`openness` 从 1（睁）到 0（闭）连续可变。睁着是杏仁形的上下睑，
+/// 闭上时两条睑合到同一道下弯的弧上 —— 弧朝下，闭着的眼才不会被读成一条抿直的嘴。
+private struct EyeLids: Shape {
+    var openness: CGFloat
+
+    var animatableData: CGFloat {
+        get { openness }
+        set { openness = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let left = CGPoint(x: rect.minX + 0.09 * rect.width, y: rect.minY + 0.47 * rect.height)
+        let right = CGPoint(x: rect.maxX - 0.09 * rect.width, y: left.y)
+        // 二次曲线的控制点：睁着时上睑弓到顶、下睑坠到底（都越出格子，弓出来的
+        // 顶点才落在格内），闭上时两条一起落到同一个点 —— 那道下弯的弧。
+        let closed = rect.minY + 0.66 * rect.height
+        let top = closed + (rect.minY - 0.03 * rect.height - closed) * openness
+        let bottom = closed + (rect.minY + 1.03 * rect.height - closed) * openness
+        var path = Path()
+        path.move(to: left)
+        path.addQuadCurve(to: right, control: CGPoint(x: rect.midX, y: top))
+        path.addQuadCurve(to: left, control: CGPoint(x: rect.midX, y: bottom))
+        return path
+    }
+}
+
+/// 闭眼时那三根睫毛。只在闭合时露面，露不露由外面的透明度管，形状本身不变。
+private struct EyeLashes: Shape {
+    func path(in rect: CGRect) -> Path {
+        let lashes: [(CGPoint, CGPoint)] = [
+            (CGPoint(x: 0.26, y: 0.59), CGPoint(x: 0.20, y: 0.71)),
+            (CGPoint(x: 0.50, y: 0.63), CGPoint(x: 0.50, y: 0.76)),
+            (CGPoint(x: 0.74, y: 0.59), CGPoint(x: 0.80, y: 0.71)),
+        ]
+        var path = Path()
+        for (from, to) in lashes {
+            path.move(to: CGPoint(x: rect.minX + from.x * rect.width, y: rect.minY + from.y * rect.height))
+            path.addLine(to: CGPoint(x: rect.minX + to.x * rect.width, y: rect.minY + to.y * rect.height))
+        }
+        return path
     }
 }

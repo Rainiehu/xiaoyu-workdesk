@@ -134,6 +134,72 @@ struct TimelineTests {
         }
     }
 
+    @Test("那只眼闭着时，已完成的不进分组，今天的也不例外")
+    func hidingCompletedFiltersEveryDay() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            let today = try day(2026, 3, 5)
+            try schedule("写周报", in: work, on: today, store)
+            try schedule("交周报", in: work, on: today, store)
+            store.toggleTodo(try #require(store.todos.first { $0.text == "写周报" }))
+
+            store.toggleHidesCompletedOnTimeline()
+
+            let timeline = store.timeline(today: today)
+            #expect(timeline.flatMap(\.todos).map(\.text) == ["交周报"])
+        }
+    }
+
+    @Test("那只眼闭着时，全做完的日子整组消失，今天这组照样在")
+    func fullyCompletedDaysVanishWhileHiding() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            let today = try day(2026, 3, 5)
+            try schedule("上周五就做完的事", in: work, on: day(2026, 2, 27), store)
+            store.toggleTodo(try #require(store.todos.first))
+            try schedule("今天做完的事", in: work, on: today, store)
+            store.toggleTodo(try #require(store.todos.first { $0.text == "今天做完的事" }))
+
+            store.toggleHidesCompletedOnTimeline()
+
+            // 上周五整组蒸发；今天是锚点，条目藏光了组还在。
+            let timeline = store.timeline(today: today)
+            #expect(timeline.map(\.day) == [today])
+            #expect(timeline.first?.todos.isEmpty == true)
+        }
+    }
+
+    @Test("那只眼闭着时，已完成待办的删除占位也不露面")
+    func deletedCompletedTodosStayHiddenToo() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            let today = try day(2026, 3, 5)
+            try schedule("做完又删掉的事", in: work, on: today, store)
+            store.toggleTodo(try #require(store.todos.first))
+            store.toggleHidesCompletedOnTimeline()
+            // 闭眼前它就没显示，删除的占位不该凭空冒出来。
+            store.deleteTodo(try #require(store.todos.first))
+
+            #expect(store.timeline(today: today).flatMap(\.todos).isEmpty)
+        }
+    }
+
+    @Test("那只眼的睁闭跨重启保留，是习惯不是会话态")
+    func eyeStateSurvivesRestart() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            #expect(store.hidesCompletedOnTimeline == false)
+            store.toggleHidesCompletedOnTimeline()
+
+            let reopened = Store(directory: dir)
+
+            #expect(reopened.hidesCompletedOnTimeline == true)
+        }
+    }
+
     /// 沙漏视图里每条待办旁边那个彩色 tag 的来处：颜色是所属分类的颜色，视图层只负责画。
     @Test("每条待办都能找回它的所属分类，连同颜色")
     func todosCanFindTheirCategory() throws {
