@@ -19,3 +19,7 @@ Resources/provisioning/Workdesk.provisionprofile
 Resources/provisioning/Provisioning.xcodeproj/project.xcworkspace/
 Resources/provisioning/Provisioning.xcodeproj/xcuserdata/
 .claude/worktrees/
+
+# 编辑器与 Xcode 的机器本地状态
+.vscode/
+ios/Workdesk.xcodeproj/xcuserdata/
