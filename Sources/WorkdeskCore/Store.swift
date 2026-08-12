@@ -1085,18 +1085,28 @@ public final class Store {
             // 本地日志说「用了多少」，接口说「还剩多少」。两件事互不依赖 ——
             // 先把请求发出去，再扫本地日志，等回来时扫描往往已经做完了。
             async let limits = shouldFetchLimits ? ClaudeUsageAPI.fetch() : nil
+            async let codexLimits = shouldFetchLimits ? CodexUsageAPI.fetch() : nil
             let local = UsageScanner.scan()
             let claude = await limits
+            let codex = await codexLimits
 
             var snapshot = UsageSnapshot()
             snapshot.claude = local.claude
             snapshot.codex = local.codex
             // 限流窗口说的是「还剩多少」，那是状态，不随日期翻篇 —— 周窗口昨天用掉的量今天
-            // 还占着。而它只能从今天动过的会话日志里读到，今天没开过 Codex 就一条也读不着，
-            // 于是卡片上两条进度条整个消失。读不着就接着显示上次那份，跟 Claude 一个待遇。
-            snapshot.codexWindows = local.codexWindows.isEmpty
-                ? (previous?.codexWindows ?? [])
-                : local.codexWindows
+            // 还占着。接口的数字是账号级的实时值，优先；拿不到就退回日志里的快照 ——
+            // 快照只在本地跑 Codex 时才更新，云端和别的设备的用量它看不见，陈旧但聊胜于无；
+            // 连快照也没有（今天没开过 Codex）就接着显示上次那份，跟 Claude 一个待遇。
+            if let codex, !codex.windows.isEmpty {
+                snapshot.codexWindows = codex.windows
+            } else {
+                snapshot.codexWindows = local.codexWindows.isEmpty
+                    ? (previous?.codexWindows ?? [])
+                    : local.codexWindows
+                if snapshot.codexWindows.isEmpty {
+                    snapshot.codexLimitsProblem = codex?.problem ?? previous?.codexLimitsProblem
+                }
+            }
 
             if let claude, !claude.windows.isEmpty {
                 snapshot.claudeWindows = claude.windows
@@ -1112,19 +1122,22 @@ public final class Store {
             }
 
             let final = snapshot
-            let outcome = claude
+            // 两个接口共用一套节奏与退避 —— 任何一边被 429，下一轮就整体放慢。
+            // 分开记账当然更精细，但两份计时器换来的只是「一边挨罚另一边照常」，不值。
+            let rateLimited = claude?.isRateLimited == true || codex?.isRateLimited == true
+            let fetched = claude != nil || codex != nil
             await MainActor.run {
                 self.usage = final
                 self.usageLoading = false
-                if let outcome { self.scheduleNextLimitsFetch(after: outcome) }
+                if fetched { self.scheduleNextLimitsFetch(rateLimited: rateLimited) }
             }
         }
     }
 
-    /// 定下次什么时候再问那个接口。拿到了就回到常规节奏；被限流就翻倍退避，到半小时封顶。
+    /// 定下次什么时候再问那两个接口。拿到了就回到常规节奏；被限流就翻倍退避，到半小时封顶。
     /// 退避是必须的 —— 被 429 之后继续按原节奏硬打，只会一直 429 下去。
-    private func scheduleNextLimitsFetch(after result: ClaudeUsageAPI.Result) {
-        limitsBackoff = Self.nextBackoff(from: limitsBackoff, rateLimited: result.isRateLimited)
+    private func scheduleNextLimitsFetch(rateLimited: Bool) {
+        limitsBackoff = Self.nextBackoff(from: limitsBackoff, rateLimited: rateLimited)
         limitsNextFetch = .now.addingTimeInterval(max(limitsBackoff, Self.usageLimitsInterval))
     }
 

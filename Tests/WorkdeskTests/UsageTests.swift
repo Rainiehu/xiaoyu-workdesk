@@ -58,6 +58,40 @@ struct UsageTests {
         }
     }
 
+    /// `wham/usage` 的真实返回形状，数字改过。`secondary_window` 是 null、百分比是整数、
+    /// 还有一串全为 0 的 `additional_rate_limits` —— 都是解析要扛住或绕开的东西。
+    static let codexUsageJSON = """
+    {"user_id":"user-x","account_id":"acc-x","email":"x@example.com","plan_type":"pro",
+     "rate_limit":{"allowed":true,"limit_reached":false,
+     "primary_window":{"used_percent":37,"limit_window_seconds":604800,
+     "reset_after_seconds":568072,"reset_at":1787012309},"secondary_window":null},
+     "code_review_rate_limit":null,
+     "additional_rate_limits":[{"limit_name":"Spark","metered_feature":"codex_x",
+     "rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":604800,
+     "reset_at":1787049037},"secondary_window":null}}],
+     "credits":{"has_credits":false,"unlimited":false,"balance":"0"},"promo":null}
+    """.data(using: .utf8)!
+
+    @Test("Codex 接口：周窗口解析出来，整数百分比与 epoch 秒的重置时刻都在")
+    func parsesCodexUsage() throws {
+        let windows = UsageLimits.parseCodexUsage(Self.codexUsageJSON)
+
+        let week = try #require(windows.first)
+        #expect(windows.count == 1)   // secondary 是 null，不该凭空多出一条
+        #expect(week.name == "7 天")
+        #expect(week.percent == 37)
+        let resets = try #require(week.resetsAt)
+        #expect(resets == Date(timeIntervalSince1970: 1_787_012_309))
+    }
+
+    @Test("Codex 接口返回是空的或坏的，解析不炸，只是什么也没有")
+    func survivesCodexGarbage() {
+        for bad in ["", "{}", "not json", #"{"rate_limit":null}"#,
+                    #"{"rate_limit":{"primary_window":null}}"#] {
+            #expect(UsageLimits.parseCodexUsage(bad.data(using: .utf8)!).isEmpty)
+        }
+    }
+
     @Test("窗口长度说成人话")
     func namesWindows() {
         #expect(UsageLimits.windowName(minutes: 300) == "5 小时")

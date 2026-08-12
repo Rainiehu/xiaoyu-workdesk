@@ -43,11 +43,13 @@ public struct UsageSnapshot: Sendable {
     public var codex = ToolUsage()
     /// Claude 的限流窗口，来自 `/api/oauth/usage`。拿不到时是空的。
     public var claudeWindows: [UsageWindow] = []
-    /// Codex 的限流窗口，来自 rollout 日志里的 `rate_limits`。
+    /// Codex 的限流窗口，来自 `wham/usage` 接口；接口没拿到时退回 rollout 日志里的快照。
     public var codexWindows: [UsageWindow] = []
     public var extraSpend: ExtraSpend?
     /// Claude 的限流为什么没拿到。空表示拿到了 —— 说清楚比默默显示不出来强。
     public var claudeLimitsProblem: String?
+    /// Codex 的限流为什么没拿到。与 Claude 一个待遇。
+    public var codexLimitsProblem: String?
     public var scannedAt: Date = .now
 }
 
@@ -91,6 +93,26 @@ enum UsageLimits {
                                currency: extra["currency"] as? String ?? "")
         }
         return (windows, spend)
+    }
+
+    /// 解析 `wham/usage` 的返回 —— Codex 桌面版「剩余用量」那块的数据来源。
+    ///
+    /// 接口给的是 `used_percent`（用掉的，和卡片一个方向），窗口长度以秒计，
+    /// 重置时刻是 epoch 秒。`secondary_window` 眼下是 null，但有值就一并显示。
+    /// 返回里还有一串按模型细分的 `additional_rate_limits`，全是 0，等真用上了再说。
+    static func parseCodexUsage(_ data: Data) -> [UsageWindow] {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let rate = root["rate_limit"] as? [String: Any] else { return [] }
+        var windows: [UsageWindow] = []
+        for key in ["primary_window", "secondary_window"] {
+            guard let w = rate[key] as? [String: Any],
+                  let percent = w["used_percent"] as? Double,
+                  let seconds = w["limit_window_seconds"] as? Int else { continue }
+            let resets = (w["reset_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
+            windows.append(UsageWindow(name: windowName(minutes: seconds / 60),
+                                       percent: percent, resetsAt: resets))
+        }
+        return windows
     }
 
     /// ISO8601 带小数秒 —— 接口给的是 `2026-07-26T14:49:59.679695+00:00` 这种。

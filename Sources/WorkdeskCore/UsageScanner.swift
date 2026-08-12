@@ -2,8 +2,9 @@ import Foundation
 
 /// 扫描本机 Claude Code / Codex 的会话日志，统计今日 token 用量。
 ///
-/// 日志只说「用了多少」。Claude 的「还剩多少」得走 `ClaudeUsageAPI`；Codex 则把限流状态
-/// 一并写在 rollout 日志里，这里顺手取了。
+/// 日志只说「用了多少」。「还剩多少」各走各的接口：Claude 是 `ClaudeUsageAPI`，
+/// Codex 是 `CodexUsageAPI`。Codex 的 rollout 日志里也写着限流快照，这里顺手取了 ——
+/// 但那只是写下当刻的数字，账号在云端和别的设备上的用量它看不见，只配当接口失联时的备胎。
 // 扫的是这台 Mac 上的会话日志，iOS 上无此物 —— 整个文件只属于 macOS。
 #if os(macOS)
 enum UsageScanner {

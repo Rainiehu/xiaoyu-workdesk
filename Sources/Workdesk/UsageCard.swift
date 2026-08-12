@@ -4,7 +4,7 @@ import WorkdeskCore
 /// 侧边栏底部的小卡片：两个工具今日的 token 用量，各自的限流窗口还剩多少。
 ///
 /// 两件事分两行说：粗体那行是「今天花了多少」，底下细条是「离限流还有多远」。
-/// 前者来自本地日志，后者 Claude 走接口、Codex 走它自己的 rollout 日志。
+/// 前者来自本地日志，后者两家都走各自的接口 —— Codex 拿不到接口时退回 rollout 日志里的快照。
 struct UsageCard: View {
     @Environment(Store.self) private var store
     /// 每分钟自己重扫一次。窗口以小时计，这个频率足够，也不至于让界面上的数字像秒表。
@@ -21,7 +21,8 @@ struct UsageCard: View {
             } else if let u = store.usage {
                 tool(dot: .orange, name: "Claude Code", usage: u.claude,
                      windows: u.claudeWindows, problem: u.claudeLimitsProblem)
-                tool(dot: .indigo, name: "Codex", usage: u.codex, windows: u.codexWindows)
+                tool(dot: .indigo, name: "Codex", usage: u.codex,
+                     windows: u.codexWindows, problem: u.codexLimitsProblem)
                 if let spend = u.extraSpend { extraSpendRow(spend) }
             } else {
                 Text("暂无数据").font(.caption).foregroundStyle(.tertiary)
