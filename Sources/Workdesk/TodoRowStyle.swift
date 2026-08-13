@@ -163,6 +163,9 @@ struct TodoText: View {
     /// 那一行就凭空消失了，所以那两处不传，Tab 留给系统走焦点。
     var onIndent: (() -> Void)?
     var onOutdent: (() -> Void)?
+    /// 改写中回车收下这次改写之后再做什么 —— 「再开一行同级」挂在这儿。
+    /// 与 Tab 同一条边界：只在同级顺序看得见的地方接，不传就是回车只收改写。
+    var onReturn: (() -> Void)?
 
     @FocusState private var focused: Bool
 
@@ -171,7 +174,10 @@ struct TodoText: View {
             TextField("", text: $editing.draft)
                 .textFieldStyle(.plain)
                 .focused($focused)
-                .onSubmit(commit)
+                .onSubmit {
+                    commit()
+                    onReturn?()
+                }
                 // Esc 放弃这次改写，原文一字不动。
                 .onExitCommand { editing.end() }
                 // 点到别处去了也算改完 —— 一次改写没有「没保存」这个下场。

@@ -364,6 +364,34 @@ struct SubTodoTests {
         }
     }
 
+    @Test("回车再开一行：新待办紧跟在那一行后面，同窝同级")
+    func enterInsertsASiblingRightBelow() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            store.addTodo("乙", in: work.id)
+            store.addTodo("甲", in: work.id)
+            let jia = try #require(store.todos.first { $0.text == "甲" })
+
+            // 顶层：插在甲乙之间，不是顶上也不是末尾。
+            let newID = try #require(store.addTodo("甲二", after: jia.id))
+            #expect(store.columns(in: work.id).unfinished.map(\.text) == ["甲", "甲二", "乙"])
+            #expect(try #require(store.todos.first { $0.id == newID }).plannedOn == nil)
+
+            // 树里：同窝同级，跟在锚点后面。
+            store.addSubTodo("一", under: jia.id)
+            store.addSubTodo("三", under: jia.id)
+            let first = try #require(store.children(of: jia.id).first)
+            _ = store.addTodo("二", after: first.id)
+            #expect(store.children(of: jia.id).map(\.text) == ["一", "二", "三"])
+
+            // 锚点在删除态就什么也不发生。
+            store.deleteTodo(try #require(store.todos.first { $0.text == "乙" }))
+            let yi = try #require(store.todos.first { $0.text == "乙" })
+            #expect(store.addTodo("跟不上的", after: yi.id) == nil)
+        }
+    }
+
     @Test("树的形状跨重启完好：父子关系与兄弟顺序都落在盘上")
     func theTreeSurvivesARestart() throws {
         try withTemporaryDirectory { dir in

@@ -471,6 +471,28 @@ public final class Store {
         (siblings(of: SiblingGroup(categoryID: categoryID, parentID: nil)).compactMap(\.order).min() ?? 0) - 1
     }
 
+    /// 紧跟在一行后面记一条**同级**待办 —— 改写中回车「再开一行」走这条路，
+    /// 连着记几件事不必回到顶上的记事栏。与那一行同窝（同分类、同父）；
+    /// 不排期 —— 与分类视图记事同一副脾气，排期是之后另点一下的事。
+    /// - Returns: 新待办的 id，视图层拿它把输入行接到新行底下继续连写。
+    ///   那一行不在（或在删除态）就什么也不发生，返回 `nil`。
+    @discardableResult
+    public func addTodo(_ text: String, after siblingID: TodoItem.ID) -> TodoItem.ID? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty,
+              let sibling = todos.first(where: { $0.id == siblingID }), !sibling.isDeleted,
+              category(sibling.categoryID) != nil else { return nil }
+        var queue = Self.ordered(siblings(of: sibling.siblingGroup))
+        let item = TodoItem(text: t, categoryID: sibling.categoryID, parentID: sibling.parentID)
+        todos.append(item)
+        let at = queue.firstIndex { $0.id == siblingID }.map { $0 + 1 } ?? queue.count
+        queue.insert(item, at: at)
+        // 编号把整窝兄弟（含新行）一起记上账，新行自己的保存也在其中。
+        renumber(sibling.siblingGroup, as: queue)
+        saveTodos()
+        return item.id
+    }
+
     /// 打勾/取消打勾。完成时刻原样落盘 —— 截到天是显示层的事，底下留着全时刻，
     /// 于是同一天完成的几条仍分得出先后。取消打勾就把它清掉，
     /// 于是「没有完成日」和「没完成」永远是同一件事。

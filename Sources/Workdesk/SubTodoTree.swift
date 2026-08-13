@@ -22,6 +22,9 @@ final class TreeComposer {
     /// 挪完把 id 记在这儿，新长出来的那一行一露面就接着改 ——
     /// 「光标不离开文字」的手感靠这一棒接力。
     var resumeEditingID: TodoItem.ID?
+    /// 改写中回车「再开一行」：输入行开在哪一行（和它展开的子树）底下。
+    /// 记下一条就顺着挪到新行底下，连写不断。一次只开一处，与追加输入同一个道理。
+    var insertingAfter: TodoItem.ID?
 }
 
 // MARK: - 进度记号
@@ -85,6 +88,7 @@ struct SubTodoTree: View {
                     if store.isExpanded(child.id) {
                         SubTodoTree(parentID: child.id, tint: tint)
                     }
+                    SiblingInsertRow(anchor: child)
                 }
             }
             SubTodoAppendRow(parentID: parentID)
@@ -111,7 +115,8 @@ private struct SubTodoRow: View {
             TodoText(
                 todo: todo, editing: $editing,
                 onIndent: { if store.indentTodo(todo.id) { composer.resumeEditingID = todo.id } },
-                onOutdent: { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } }
+                onOutdent: { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } },
+                onReturn: { composer.insertingAfter = todo.id }
             )
             .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
 
@@ -209,6 +214,68 @@ private struct SubTodoAppendRow: View {
     private func close() {
         draft = ""
         if composing { composer.composingUnder = nil }
+    }
+}
+
+/// 改写中回车开出的那行输入：开在刚才那一行（和它展开的子树）底下，记的是**同级**的下一条。
+/// 回车记下、输入行顺着挪到新行底下接着写 —— 与顶上的记事栏各管一头：
+/// 记事栏记「最要紧的新事」（落顶上），这儿记「顺着写下去」（落在手边）。
+/// Esc 收场；点到别处写了一半的字照样记下 —— 记事没有「没保存」这个下场。
+/// 平时什么也不画：它只在 `TreeComposer.insertingAfter` 指着自己的锚点时露面。
+struct SiblingInsertRow: View {
+    @Environment(Store.self) private var store
+    @Environment(TreeComposer.self) private var composer
+    let anchor: TodoItem
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    private var open: Bool { composer.insertingAfter == anchor.id }
+
+    var body: some View {
+        if open {
+            HStack(spacing: TodoRowLayout.spacing) {
+                Image(systemName: "circle.dotted")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.tertiary)
+                TextField("接着记…", text: $draft)
+                    .textFieldStyle(.plain)
+                    .focused($focused)
+                    .onSubmit(submit)
+                    .onExitCommand { close() }
+                    .onChange(of: focused) { _, now in if !now { blur() } }
+                    .onAppear { focused = true }
+            }
+            .padding(.horizontal, TodoRowLayout.horizontalInset)
+            .padding(.vertical, TodoRowLayout.verticalInset)
+        }
+    }
+
+    /// 回车：记在锚点后面，输入行挪到新行底下连写。空白回车就是写完了，收场。
+    private func submit() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            close()
+            return
+        }
+        guard let newID = store.addTodo(text, after: anchor.id) else {
+            close()
+            return
+        }
+        draft = ""
+        composer.insertingAfter = newID
+    }
+
+    private func blur() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { _ = store.addTodo(text, after: anchor.id) }
+        close()
+    }
+
+    /// 只收自己名下的这一行 —— 连写把输入挪去新行底下之后，旧实例的失焦不该
+    /// 反手把新开的那行关掉。
+    private func close() {
+        draft = ""
+        if open { composer.insertingAfter = nil }
     }
 }
 

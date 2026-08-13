@@ -88,6 +88,8 @@ struct CategoryTodoList: View {
                         if store.isExpanded(todo.id) {
                             SubTodoTree(parentID: todo.id, tint: category.color.tint)
                         }
+                        // 改写中回车「再开一行」的输入就开在这儿 —— 平时什么也不画。
+                        SiblingInsertRow(anchor: todo)
                     }
                 }
             }
@@ -175,7 +177,8 @@ private struct TodoRow: View {
                 onIndent: reorderable
                     ? { if store.indentTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil,
                 onOutdent: reorderable
-                    ? { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil
+                    ? { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil,
+                onReturn: reorderable ? { composer.insertingAfter = todo.id } : nil
             )
 
             TodoTreeBadge(todo: todo)
