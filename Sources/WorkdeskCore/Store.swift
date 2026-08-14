@@ -625,6 +625,20 @@ public final class Store {
         Self.ordered(todos.filter { $0.parentID == id })
     }
 
+    /// 树的可见顺序里，一行的上一行：有前一个兄弟就是它名下最深的末子（树常开，
+    /// 它就是紧贴在上面的那行），没有前兄弟就是父行；顶层第一行没有上一行。
+    /// 删除态的行不算 —— 光标接不到占位上。
+    ///
+    /// 给键盘流用的：空行上按删除收走这一行之后，光标退回上一行的末尾接着改。
+    public func todoBefore(_ id: TodoItem.ID) -> TodoItem.ID? {
+        guard let item = todos.first(where: { $0.id == id }) else { return nil }
+        let queue = Self.ordered(siblings(of: item.siblingGroup)).filter { !$0.isDeleted }
+        guard let i = queue.firstIndex(where: { $0.id == id }), i > 0 else { return item.parentID }
+        var prev = queue[i - 1]
+        while let last = children(of: prev.id).filter({ !$0.isDeleted }).last { prev = last }
+        return prev.id
+    }
+
     /// 在一条待办下面添一步。子待办生在**兄弟末尾** —— 步骤有天然先后，人是按
     /// 1、2、3 的顺序写的，追加在尾才保得住书写顺序（顶层「新记的落最上面」为的是
     /// 「最近的最要紧」，这里刻意不同）。归属分类跟着父；没有自己的计划日。

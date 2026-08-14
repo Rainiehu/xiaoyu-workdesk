@@ -103,6 +103,13 @@ private struct SubTodoRow: View {
                 editing.begin(todo)
             }
         }
+        // 删行把光标退回来时，这一行早就在屏上了，onAppear 不会再响 —— 变化也得接。
+        .onChange(of: composer.resumeEditingID) { _, id in
+            if id == todo.id {
+                composer.resumeEditingID = nil
+                editing.begin(todo)
+            }
+        }
     }
 }
 

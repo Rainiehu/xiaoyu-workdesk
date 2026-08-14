@@ -165,6 +165,7 @@ struct TodoEditing {
 /// `Text` 和 `TextField` 因此一起跟着变，两种模样的字不会差一号。
 struct TodoText: View {
     @Environment(Store.self) private var store
+    @Environment(TreeComposer.self) private var composer
     let todo: TodoItem
     @Binding var editing: TodoEditing
     /// 改写中按下 Tab / Shift+Tab 时做什么 —— 缩进（挂到上一个兄弟下面）与升一级。
@@ -238,17 +239,30 @@ struct TodoText: View {
                 // 走软删除、开撤销窗口，与行上的删除钮同一条路。
                 // 生下来就空的行例外：它没有内容可反悔，悄悄收走、不留占位。
                 .onKeyPress(phases: .down) { press in
+                    // 拼音正在组字（有 marked text）时，什么键都不抢：那一击删的是
+                    // 组字里的字母、Tab 选的是候选 —— 都是输入法的事，不是这条待办的。
+                    // 组字中草稿还空着，不让开的话，删拼音就被认成了删整条待办。
+                    if let fieldEditor = NSApp.keyWindow?.firstResponder as? NSTextView,
+                       fieldEditor.hasMarkedText() {
+                        return .ignored
+                    }
                     // 删除键与 backtab 一样按名字认不齐 —— 送进来的是 DEL（0x7F）
                     // 或 BS（0x08）字符，按键名与字符两头都认。
                     let backspace = press.key == .delete
                         || press.characters == "\u{7F}" || press.characters == "\u{8}"
                     if backspace, editing.draft.isEmpty {
                         editing.end()
+                        // 收走这一行之后，光标退回上一行的末尾接着改 —— 键盘流里
+                        // 删行不该把手甩在半空。只在回车开得出新行的地方接
+                        // （与 onReturn 同一条边界）：别处没人消费这份接力，
+                        // 记下的 id 会在行视图重建时冷不丁把那行拽进改写。
+                        let previous = onReturn != nil ? store.todoBefore(todo.id) : nil
                         if todo.text.isEmpty {
                             store.discardEmptyTodo(todo.id)
                         } else {
                             withAnimation { store.deleteTodo(todo) }
                         }
+                        if let previous { composer.resumeEditingID = previous }
                         return .handled
                     }
                     let backtab = press.characters == "\u{19}"
