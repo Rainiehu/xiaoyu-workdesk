@@ -143,10 +143,14 @@ struct TodoDragPreview: View {
 struct TodoEditing {
     private(set) var active = false
     var draft = ""
+    /// 这次改写是从哪一下点击进来的（窗口坐标）。有它，光标就落在点到的那个字上；
+    /// 没有（右键改写、Tab 挪位续编、新生的空行），光标落到末尾。
+    var caretPoint: NSPoint?
 
     /// 拿现在的正文当草稿，人于是接着改，而不是从空白重打一遍。
-    mutating func begin(_ todo: TodoItem) {
+    mutating func begin(_ todo: TodoItem, at point: NSPoint? = nil) {
         draft = todo.text
+        caretPoint = point
         active = true
     }
 
@@ -173,6 +177,9 @@ struct TodoText: View {
     var onReturn: (() -> Void)?
 
     @FocusState private var focused: Bool
+    /// 这一场改写里光标摆过了没。摆一次就收手 —— 之后的选区变化都是人自己的
+    /// （拖选、Cmd+A），不能再去动。每次输入框出现时归零。
+    @State private var caretPlaced = false
 
     var body: some View {
         if editing.active {
@@ -198,10 +205,28 @@ struct TodoText: View {
                 // 上一行的输入框才刚交还第一响应者 —— 同拍去抢会被那次交还冲掉，
                 // 光标就得等人再点一下。让一拍，稳稳落下。
                 .onAppear {
+                    caretPlaced = false
                     Task { @MainActor in
                         await Task.yield()
                         focused = true
+                        await placeCaretFallback()
                     }
+                }
+                // 光标复位的正路：成为第一响应者那一下，AppKit 默认全选，选区变化的通知
+                // 同步发出来 —— 在通知里当场换成光标落点，全选就一帧都上不了屏。
+                // 认准「全选」这个签名再动手：场编辑器刚装上字时会有别的选区变化，
+                // 接早了，之后真正的全选就又盖回来了。
+                .onReceive(NotificationCenter.default.publisher(
+                    for: NSTextView.didChangeSelectionNotification
+                )) { note in
+                    guard !caretPlaced,
+                          let editor = note.object as? NSTextView,
+                          editor.window?.firstResponder === editor,
+                          editor.string == editing.draft else { return }
+                    let all = NSRange(location: 0, length: (editor.string as NSString).length)
+                    guard all.length > 0, editor.selectedRange() == all else { return }
+                    caretPlaced = true
+                    editor.setSelectedRange(NSRange(location: caretIndex(in: editor), length: 0))
                 }
                 // Tab 缩进、Shift+Tab 升一级：先把改到一半的字收下（挪位置不丢字），
                 // 再挪。光标的接力见 `TreeComposer.resumeEditingID`。
@@ -237,6 +262,30 @@ struct TodoText: View {
         } else {
             Text(todo.text)
                 .multilineTextAlignment(.leading)
+        }
+    }
+
+    /// 光标该落在哪。点进来是要接着改，不是要重打一遍 —— 落在点到的那个字上；
+    /// 点在字后面的空处、或没有点击位置（右键改写、Tab 续编），落到末尾。
+    private func caretIndex(in editor: NSTextView) -> Int {
+        if let point = editing.caretPoint {
+            return editor.characterIndexForInsertion(at: editor.convert(point, from: nil))
+        }
+        return (editor.string as NSString).length
+    }
+
+    /// 光标复位的后路：万一那次全选没走选区变化的通知（或早于第一响应者换手，
+    /// 通知里认不出来），这儿慢几拍把它扶正。正路已经摆过就不动。
+    /// 等不到（点走了、行没了）就算了，全选也只是回到旧样子。
+    private func placeCaretFallback() async {
+        for _ in 0..<40 {
+            await Task.yield()
+            if caretPlaced { return }
+            guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+                  editor.string == editing.draft else { continue }
+            caretPlaced = true
+            editor.setSelectedRange(NSRange(location: caretIndex(in: editor), length: 0))
+            return
         }
     }
 
@@ -313,7 +362,10 @@ extension View {
             TodoRowMenuItems(todo: todo, editing: editing)
         }
         .onTapGesture {
-            if !editing.wrappedValue.active { editing.wrappedValue.begin(todo) }
+            // 顺手记下这一下点在窗口的哪儿：光标要落在点到的那个字上，不是全选。
+            if !editing.wrappedValue.active {
+                editing.wrappedValue.begin(todo, at: NSApp.currentEvent?.locationInWindow)
+            }
         }
     }
 
