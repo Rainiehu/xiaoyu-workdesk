@@ -189,7 +189,15 @@ struct TodoText: View {
                 }
                 // 点到别处去了也算改完 —— 一次改写没有「没保存」这个下场。
                 .onChange(of: focused) { _, focused in if !focused { commit() } }
-                .onAppear { focused = true }
+                // 焦点慢一拍再落：回车生出新行时，这个输入框出现的同一拍里，
+                // 上一行的输入框才刚交还第一响应者 —— 同拍去抢会被那次交还冲掉，
+                // 光标就得等人再点一下。让一拍，稳稳落下。
+                .onAppear {
+                    Task { @MainActor in
+                        await Task.yield()
+                        focused = true
+                    }
+                }
                 // Tab 缩进、Shift+Tab 升一级：先把改到一半的字收下（挪位置不丢字），
                 // 再挪。光标的接力见 `TreeComposer.resumeEditingID`。
                 // Shift+Tab 在 AppKit 里送来的不是带 shift 的 tab，是 backtab（0x19）——
