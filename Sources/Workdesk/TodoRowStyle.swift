@@ -200,7 +200,11 @@ struct TodoText: View {
                 // 走软删除、开撤销窗口，与行上的删除钮同一条路。
                 // 生下来就空的行例外：它没有内容可反悔，悄悄收走、不留占位。
                 .onKeyPress(phases: .down) { press in
-                    if press.key == .delete, editing.draft.isEmpty {
+                    // 删除键与 backtab 一样按名字认不齐 —— 送进来的是 DEL（0x7F）
+                    // 或 BS（0x08）字符，按键名与字符两头都认。
+                    let backspace = press.key == .delete
+                        || press.characters == "\u{7F}" || press.characters == "\u{8}"
+                    if backspace, editing.draft.isEmpty {
                         editing.end()
                         if todo.text.isEmpty {
                             store.discardEmptyTodo(todo.id)
