@@ -174,12 +174,19 @@ struct TodoText: View {
             TextField("", text: $editing.draft)
                 .textFieldStyle(.plain)
                 .focused($focused)
+                // 回车收下这次改写，写了字就接着「再开一行」；空着回车就是写完了，
+                // 只收改写不开新行 —— 与「空行悄悄收走」是同一句话的两半。
                 .onSubmit {
+                    let wrote = !editing.draft
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     commit()
-                    onReturn?()
+                    if wrote { onReturn?() }
                 }
-                // Esc 放弃这次改写，原文一字不动。
-                .onExitCommand { editing.end() }
+                // Esc 放弃这次改写，原文一字不动；生下来就空的行没有原文，悄悄收走。
+                .onExitCommand {
+                    editing.end()
+                    if todo.text.isEmpty { store.discardEmptyTodo(todo.id) }
+                }
                 // 点到别处去了也算改完 —— 一次改写没有「没保存」这个下场。
                 .onChange(of: focused) { _, focused in if !focused { commit() } }
                 .onAppear { focused = true }
@@ -191,10 +198,15 @@ struct TodoText: View {
                 // 删光了字再按一下删除，删的就是这条待办。「改成空白不算改」照旧 ——
                 // 空着回车或点走，原文留着；但空行上的再一击是明确的删除表态，
                 // 走软删除、开撤销窗口，与行上的删除钮同一条路。
+                // 生下来就空的行例外：它没有内容可反悔，悄悄收走、不留占位。
                 .onKeyPress(phases: .down) { press in
                     if press.key == .delete, editing.draft.isEmpty {
                         editing.end()
-                        withAnimation { store.deleteTodo(todo) }
+                        if todo.text.isEmpty {
+                            store.discardEmptyTodo(todo.id)
+                        } else {
+                            withAnimation { store.deleteTodo(todo) }
+                        }
                         return .handled
                     }
                     let backtab = press.characters == "\u{19}"
@@ -211,10 +223,16 @@ struct TodoText: View {
         }
     }
 
-    /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路。
+    /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路；
+    /// 生下来就空、又一个字没写的行是例外：悄悄收走，见 `discardEmptyTodo`。
     private func commit() {
         guard editing.active else { return }
         editing.end()
+        if todo.text.isEmpty,
+           editing.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            store.discardEmptyTodo(todo.id)
+            return
+        }
         store.editTodo(todo, to: editing.draft)
     }
 }
@@ -254,8 +272,10 @@ struct TodoRowMenuItems: View {
     var body: some View {
         Button("改写") { editing.begin(todo) }
         Button("添加子待办") {
-            // 树常开，点了当场在孩子们末尾浮出一行输入，接着写。
-            composer.composingUnder = todo.id
+            // 当场在孩子们末尾生一行空的，光标就位 —— 先有行、后有字。
+            if let newID = store.addSubTodo("", under: todo.id) {
+                composer.resumeEditingID = newID
+            }
         }
         if todo.parentID != nil {
             Button("升一级") { withAnimation { _ = store.promoteTodo(todo.id) } }

@@ -447,16 +447,20 @@ public final class Store {
     /// 紧跟在一行后面记一条**同级**待办 —— 改写中回车「再开一行」走这条路，
     /// 连着记几件事不必回到顶上的记事栏。与那一行同窝（同分类、同父）；
     /// 不排期 —— 与分类视图记事同一副脾气，排期是之后另点一下的事。
-    /// - Returns: 新待办的 id，视图层拿它把输入行接到新行底下继续连写。
+    ///
+    /// 空正文也生：回车开的是「先有行、后有字」的新行，句子随后就地写 ——
+    /// 没写字就走的空行由 `discardEmptyTodo` 悄悄收走。别处的记事入口仍不受理空白。
+    /// - Returns: 新待办的 id，视图层拿它把光标接到新行上。
     ///   那一行不在（或在删除态）就什么也不发生，返回 `nil`。
     @discardableResult
     public func addTodo(_ text: String, after siblingID: TodoItem.ID) -> TodoItem.ID? {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty,
-              let sibling = todos.first(where: { $0.id == siblingID }), !sibling.isDeleted,
+        guard let sibling = todos.first(where: { $0.id == siblingID }), !sibling.isDeleted,
               category(sibling.categoryID) != nil else { return nil }
         var queue = Self.ordered(siblings(of: sibling.siblingGroup))
-        let item = TodoItem(text: t, categoryID: sibling.categoryID, parentID: sibling.parentID)
+        let item = TodoItem(
+            text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            categoryID: sibling.categoryID, parentID: sibling.parentID
+        )
         todos.append(item)
         let at = queue.firstIndex { $0.id == siblingID }.map { $0 + 1 } ?? queue.count
         queue.insert(item, at: at)
@@ -464,6 +468,22 @@ public final class Store {
         renumber(sibling.siblingGroup, as: queue)
         saveTodos()
         return item.id
+    }
+
+    /// 悄悄收走一条没写字的行 —— 回车或「添加子待办」开出的新行，没写字就走了
+    /// （Esc、点到别处、空行上又一记回车/删除）。一句话都没有的待办不值得占位，
+    /// 也不开撤销窗口：没有内容，无从反悔。删除记号照打、进池子照进 ——
+    /// 这行可能已经同步出去了，得让云端也知道它没了。
+    /// 写了字的、或名下已经有孩子的，不走这条路。
+    public func discardEmptyTodo(_ id: TodoItem.ID) {
+        guard let i = todos.firstIndex(where: { $0.id == id }), !todos[i].isDeleted,
+              todos[i].text.isEmpty, children(of: id).isEmpty else { return }
+        var item = todos.remove(at: i)
+        item.deletedAt = .now
+        deletedTodos.append(item)
+        saveTodos()
+        saveDeletedTodos()
+        logSyncChange { $0.recordSave(item.changeEntry) }
     }
 
     /// 打勾/取消打勾。完成时刻原样落盘 —— 截到天是显示层的事，底下留着全时刻，
@@ -609,18 +629,24 @@ public final class Store {
     /// 1、2、3 的顺序写的，追加在尾才保得住书写顺序（顶层「新记的落最上面」为的是
     /// 「最近的最要紧」，这里刻意不同）。归属分类跟着父；没有自己的计划日。
     /// 父不在或在删除态就什么也不发生 —— 不给死人添孩子。
-    public func addSubTodo(_ text: String, under parentID: TodoItem.ID) {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty,
-              let parent = todos.first(where: { $0.id == parentID }), !parent.isDeleted else { return }
+    ///
+    /// 空正文也生，与 `addTodo(_:after:)` 同一个道理：「添加子待办」开的是先有行、
+    /// 后有字的新行，没写字就走的由 `discardEmptyTodo` 悄悄收走。
+    /// - Returns: 新待办的 id，视图层拿它把光标接到新行上。
+    @discardableResult
+    public func addSubTodo(_ text: String, under parentID: TodoItem.ID) -> TodoItem.ID? {
+        guard let parent = todos.first(where: { $0.id == parentID }), !parent.isDeleted
+        else { return nil }
         let group = SiblingGroup(categoryID: parent.categoryID, parentID: parentID)
         let item = TodoItem(
-            text: t, categoryID: parent.categoryID, parentID: parentID,
+            text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            categoryID: parent.categoryID, parentID: parentID,
             order: (siblings(of: group).compactMap(\.order).max() ?? -1) + 1
         )
         todos.append(item)
         saveTodos()
         logSyncChange { $0.recordSave(item.changeEntry) }
+        return item.id
     }
 
     /// 入怀：把一条待办连同名下整棵子树挂到另一条下面，落在它孩子的末尾。

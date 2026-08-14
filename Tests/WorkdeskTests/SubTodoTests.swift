@@ -369,6 +369,30 @@ struct SubTodoTests {
         }
     }
 
+    @Test("回车生的是空行：先有行后有字，没写字就走的悄悄收走")
+    func emptyRowsAreBornRealAndDiscardedQuietly() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            store.addTodo("甲", in: work.id)
+            let jia = try #require(store.todos.first)
+
+            // 空行生得出来，站在锚点正后方。
+            let blank = try #require(store.addTodo("", after: jia.id))
+            #expect(store.columns(in: work.id).unfinished.map(\.text) == ["甲", ""])
+
+            // 没写字就走：不留占位、不开撤销窗口，进池子让云端也知道。
+            store.discardEmptyTodo(blank)
+            #expect(store.todos.map(\.text) == ["甲"])
+            #expect(store.pendingUndos.isEmpty)
+            #expect(store.deletedTodos.count == 1)
+
+            // 写了字的不走这条路 —— 收走要过「一字没有」这道门。
+            store.discardEmptyTodo(jia.id)
+            #expect(store.todos.map(\.text) == ["甲"])
+        }
+    }
+
     @Test("树的形状跨重启完好：父子关系与兄弟顺序都落在盘上")
     func theTreeSurvivesARestart() throws {
         try withTemporaryDirectory { dir in

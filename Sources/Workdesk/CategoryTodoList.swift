@@ -86,8 +86,6 @@ struct CategoryTodoList: View {
                         // 子树常开，就摊在行底下。右列也一样 —— 完成的事带着它的步骤
                         // 一起退到背景里。
                         SubTodoTree(parentID: todo.id, tint: category.color.tint)
-                        // 改写中回车「再开一行」的输入就开在这儿 —— 平时什么也不画。
-                        SiblingInsertRow(anchor: todo)
                     }
                 }
             }
@@ -176,7 +174,11 @@ private struct TodoRow: View {
                     ? { if store.indentTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil,
                 onOutdent: reorderable
                     ? { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil,
-                onReturn: reorderable ? { composer.insertingAfter = todo.id } : nil
+                onReturn: reorderable ? {
+                    if let newID = store.addTodo("", after: todo.id) {
+                        composer.resumeEditingID = newID
+                    }
+                } : nil
             )
 
             Spacer(minLength: 8)
