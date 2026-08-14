@@ -204,7 +204,7 @@ private struct TodoRow: View {
         .draggable(DraggedTodo(id: todo.id)) { TodoDragPreview(text: todo.text, tint: tint) }
         // 落间换位、落身入怀：缝亮线、身亮圈。右列不接缝 —— 那儿的顺序不由人排，
         // 行上只剩「入怀」一件事。
-        .todoTreeDropTarget(todo, allowsGaps: reorderable)
+        .todoTreeDropTarget(todo, allowsGaps: reorderable, tint: tint)
         // 光标的接力（Tab/Shift+Tab 挪完、删行退回）收在 `resumesTreeEditing` 一处。
         .resumesTreeEditing(todo, editing: $editing)
     }

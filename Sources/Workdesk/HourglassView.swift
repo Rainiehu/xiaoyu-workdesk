@@ -346,7 +346,7 @@ private struct TimelineRow: View {
         }
         // 轴上的行不接缝：这条轴的顺序不由人排，行身只有「入怀」一件事 ——
         // 改期落在组的任何别处（组头、行距、留白），照旧由整组接住。
-        .todoTreeDropTarget(todo, allowsGaps: false)
+        .todoTreeDropTarget(todo, allowsGaps: false, tint: tint)
     }
 }
 

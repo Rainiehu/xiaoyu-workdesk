@@ -193,8 +193,9 @@ private struct CategoryTab: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .tabChip(category.color.tint, isSelected: isSelected, hovering: hovering)
-                // 落点指示与沙漏视图里那圈一样是青色描边：「松手会落在这儿」两处是同一句话。
-                .overlay(Capsule().strokeBorder(.teal.opacity(targeted ? 0.7 : 0), lineWidth: 2))
+                // 落点指示穿这个 tab 自己的颜色 —— 与行上的线、圈同一条规矩：落点是谁的地盘，
+                // 指示就穿谁的衣裳。沙漏那儿的圈是青，也是同一条规矩：那一屏的主调就是青。
+                .overlay(Capsule().strokeBorder(category.color.tint.opacity(targeted ? 0.7 : 0), lineWidth: 2))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

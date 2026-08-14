@@ -144,7 +144,7 @@ private struct UnscheduledRow: View {
         }
         // 落间换位、落身入怀：组内的顺序与分类视图左列是同一份，缝也照样接。
         // 跨分类组的缝 `Store` 不接（弹回去）—— 换分类是拖到 tab 上的事，一次只动一样。
-        .todoTreeDropTarget(todo, allowsGaps: true)
+        .todoTreeDropTarget(todo, allowsGaps: true, tint: tint)
     }
 
     /// 打勾：圈先亮起来，过一拍这条才真的记成完成、跟着淡出这一列。

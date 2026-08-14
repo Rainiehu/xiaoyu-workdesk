@@ -86,7 +86,7 @@ private struct SubTodoRow: View {
         .contentShape(Rectangle())
         .todoRowEditing(todo, editing: $editing)
         .draggable(DraggedTodo(id: todo.id)) { TodoDragPreview(text: todo.text, tint: tint) }
-        .todoTreeDropTarget(todo, allowsGaps: true)
+        .todoTreeDropTarget(todo, allowsGaps: true, tint: tint)
         // 光标的接力（Tab/Shift+Tab 挪完、删行退回）收在 `resumesTreeEditing` 一处。
         .resumesTreeEditing(todo, editing: $editing)
     }
@@ -104,6 +104,36 @@ enum TodoDropZone {
     case after
 }
 
+/// 全屏此刻亮着的那一枚行落点指示。指针只有一个，亮着的落点就只该有一枚 ——
+/// 集中存一份，谁接手谁顶掉上一枚。
+///
+/// 不让每行各存各的亮灭，是因为 macOS 的拖放回调靠不住：行间挪得快会漏 `dropExited`，
+/// 松手后偶尔还补发一个 `dropUpdated`。分散存的话漏一次就留一条永远不灭的线；
+/// 集中这一份，落下时不管漏了谁，一句「全灭」就收干净。
+@Observable
+@MainActor
+final class TodoDropIndicator {
+    private(set) var row: TodoItem.ID?
+    private(set) var zone: TodoDropZone?
+
+    /// 亮在这一行的这一段，别处正亮着的就势灭掉。
+    func light(_ row: TodoItem.ID, _ zone: TodoDropZone) {
+        self.row = row
+        self.zone = zone
+    }
+
+    /// 指针离开这一行时只灭自己那一枚 —— 别的行可能已经接手点亮了。
+    func dim(_ row: TodoItem.ID) {
+        if self.row == row { extinguish() }
+    }
+
+    /// 全灭。松手落下就该一枚不剩，不论亮着的是不是落下的这一行。
+    func extinguish() {
+        row = nil
+        zone = nil
+    }
+}
+
 extension View {
     /// 给一行待办装上「落间换位、落身入怀」的落点：缝亮一条线，身亮一圈 ——
     /// 预渲染高亮先把「松手会发生什么」说清楚。
@@ -111,32 +141,41 @@ extension View {
     /// - Parameters:
     ///   - allowsGaps: 缝接不接。手排的地方（分类视图左列、未排期列、树里）接；
     ///     轴上和右列不接 —— 那两处的顺序不由人排，行上只剩「入怀」一件事。
+    ///   - tint: 线和圈穿的颜色，就是这一行勾圈的那个 tint —— 分类屏随分类色（与 tab 同色），
+    ///     轴上是青。落点指示不另立颜色，穿所在那一屏的衣裳。
     ///   - gap: 缝里那一落怎么处理。不传就是挪位置（`placeTodo`）。
     func todoTreeDropTarget(
-        _ todo: TodoItem, allowsGaps: Bool,
+        _ todo: TodoItem, allowsGaps: Bool, tint: Color,
         gap: ((TodoItem.ID, TodoDropZone) -> Bool)? = nil
     ) -> some View {
-        modifier(TodoTreeDropTarget(todo: todo, allowsGaps: allowsGaps, gap: gap))
+        modifier(TodoTreeDropTarget(todo: todo, allowsGaps: allowsGaps, tint: tint, gap: gap))
     }
 }
 
 private struct TodoTreeDropTarget: ViewModifier {
     @Environment(Store.self) private var store
+    @Environment(TodoDropIndicator.self) private var indicator
     let todo: TodoItem
     let allowsGaps: Bool
+    let tint: Color
     let gap: ((TodoItem.ID, TodoDropZone) -> Bool)?
 
-    @State private var zone: TodoDropZone?
     @State private var height: CGFloat = 0
+
+    /// 全局那一枚指示亮在本行时才有值。
+    private var zone: TodoDropZone? {
+        indicator.row == todo.id ? indicator.zone : nil
+    }
 
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-            .overlay { indicator }
+            .overlay { litIndicator }
             .onDrop(
                 of: [.workdeskTodo],
                 delegate: TodoRowDropDelegate(
-                    zone: $zone, height: height, allowsGaps: allowsGaps, perform: land
+                    row: todo.id, indicator: indicator,
+                    height: height, allowsGaps: allowsGaps, perform: land
                 )
             )
             .animation(.easeOut(duration: 0.12), value: zone == nil)
@@ -155,14 +194,15 @@ private struct TodoTreeDropTarget: ViewModifier {
         }
     }
 
-    /// 预渲染高亮：身上是一圈青描边（与 tab 栏、轴上分组的落点同一句话），
-    /// 缝是上/下边缘一条青线 —— 两态一眼分得开，松手前就知道会发生什么。
+    /// 预渲染高亮：身上是一圈描边，缝是上/下边缘一条线 ——
+    /// 两态一眼分得开，松手前就知道会发生什么。颜色随这一行的 tint：
+    /// 分类屏里就是 tab 那个分类色，轴上是青 —— 指示穿所在那一屏的衣裳。
     @ViewBuilder
-    private var indicator: some View {
+    private var litIndicator: some View {
         switch zone {
         case .into:
             RoundedRectangle(cornerRadius: TodoRowLayout.cornerRadius)
-                .strokeBorder(.teal.opacity(0.7), lineWidth: 2)
+                .strokeBorder(tint.opacity(0.7), lineWidth: 2)
         case .before:
             gapLine.frame(maxHeight: .infinity, alignment: .top)
         case .after:
@@ -174,7 +214,7 @@ private struct TodoTreeDropTarget: ViewModifier {
 
     private var gapLine: some View {
         Capsule()
-            .fill(.teal.opacity(0.8))
+            .fill(tint.opacity(0.8))
             .frame(height: 2.5)
             .padding(.horizontal, 2)
     }
@@ -184,7 +224,8 @@ private struct TodoTreeDropTarget: ViewModifier {
 /// 用 `DropDelegate` 而不是 `dropDestination` —— 只有它一路报着位置，
 /// 预渲染高亮才能跟着手走。
 private struct TodoRowDropDelegate: DropDelegate {
-    @Binding var zone: TodoDropZone?
+    let row: TodoItem.ID
+    let indicator: TodoDropIndicator
     let height: CGFloat
     let allowsGaps: Bool
     let perform: (TodoItem.ID, TodoDropZone) -> Bool
@@ -194,21 +235,25 @@ private struct TodoRowDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        zone = zone(at: info.location)
+        MainActor.assumeIsolated { indicator.light(row, zone(at: info.location)) }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        zone = zone(at: info.location)
+        // 只有亮在本行时才跟着挪。松手后系统偶尔还补发一个 dropUpdated ——
+        // 那时指示已全灭，谁也不许再把它点回来。
+        MainActor.assumeIsolated {
+            if indicator.row == row { indicator.light(row, zone(at: info.location)) }
+        }
         return DropProposal(operation: .move)
     }
 
     func dropExited(info: DropInfo) {
-        zone = nil
+        MainActor.assumeIsolated { indicator.dim(row) }
     }
 
     func performDrop(info: DropInfo) -> Bool {
         let landed = zone(at: info.location)
-        zone = nil
+        MainActor.assumeIsolated { indicator.extinguish() }
         guard let provider = info.itemProviders(for: [.workdeskTodo]).first else { return false }
         _ = provider.loadDataRepresentation(for: .workdeskTodo) { data, _ in
             guard let data,

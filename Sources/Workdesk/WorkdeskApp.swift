@@ -11,6 +11,8 @@ struct WorkdeskApp: App {
     /// 子待办树上跨行的那点会话态（谁的追加输入开着、哪行等着接着改写）。
     /// 三处视图共用一份 —— 它跟着窗口活，不落盘。
     @State private var composer = TreeComposer()
+    /// 全屏唯一那一枚行落点指示。集中一份才灭得干净，见 `TodoDropIndicator`。
+    @State private var dropIndicator = TodoDropIndicator()
 
     init() {
         // 存储目录可以用环境变量指到别处 —— 同一台 Mac 跑两个实例（不同目录、
@@ -29,6 +31,7 @@ struct WorkdeskApp: App {
                 .environment(clock)
                 .environment(sync)
                 .environment(composer)
+                .environment(dropIndicator)
                 .frame(minWidth: 860, minHeight: 560)
                 // 同步在这儿点火。没带 iCloud 权限的构建里它什么也不做 —— app 照旧是单机 app。
                 .task { sync.start() }
