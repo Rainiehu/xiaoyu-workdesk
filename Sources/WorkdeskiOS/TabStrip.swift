@@ -23,7 +23,7 @@ struct TabStrip: View {
                     // 删除态的 tab 是原位占位胶囊：撤销窗口开着的那几秒它还占着位置，
                     // 别的 tab 不合拢，见 ADR-0007。
                     if category.isDeleted {
-                        DeletedCategoryChip(id: category.id)
+                        DeletedCategoryChip(category: category)
                     } else {
                         CategoryTabChip(category: category, isSelected: selected == .category(category.id)) {
                             select(.category(category.id))
@@ -153,18 +153,19 @@ struct CategoryTabChip: View {
 /// 整个胶囊就是撤销按钮：占位上没有第二件可做的事。
 private struct DeletedCategoryChip: View {
     @Environment(Store.self) private var store
-    let id: Category.ID
+    let category: Category
 
     var body: some View {
         Button {
-            store.undeleteCategory(id)
+            store.undeleteCategory(category.id)
         } label: {
             HStack(spacing: 6) {
                 Text("已删除")
                     .foregroundStyle(.tertiary)
-                Text("撤销")
+                // 撤销钮穿死者自己的颜色 —— 占的是谁的位，就还谁的色。
+                Image(systemName: "arrow.uturn.backward")
                     .fontWeight(.semibold)
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(category.color.tint)
             }
             .font(.callout)
             .padding(.horizontal, 12)

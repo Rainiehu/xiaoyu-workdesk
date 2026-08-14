@@ -26,7 +26,7 @@ struct FinishedPanel: View {
                         ForEach(finished) { todo in
                             // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
                             if todo.isDeleted {
-                                DeletedTodoRow(todo: todo)
+                                DeletedTodoRow(todo: todo, tint: category.color.tint)
                                     .font(.callout)
                             } else {
                                 FinishedRow(todo: todo, tint: category.color.tint, today: clock.today)

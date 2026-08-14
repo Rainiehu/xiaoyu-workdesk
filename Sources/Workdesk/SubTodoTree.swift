@@ -44,7 +44,7 @@ struct SubTodoTree: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(children) { child in
                     if child.isDeleted {
-                        DeletedTodoRow(todo: child)
+                        DeletedTodoRow(todo: child, tint: tint)
                     } else {
                         SubTodoRow(todo: child, tint: tint)
                         SubTodoTree(parentID: child.id, tint: tint)

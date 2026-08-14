@@ -73,11 +73,14 @@ private struct DeletedFavoriteCard: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Spacer()
-            Button("撤销") { withAnimation { store.undeleteFavorite(item.id) } }
-                .buttonStyle(.plain)
-                .fontWeight(.semibold)
-                .foregroundStyle(.teal)
-                .help("撤销删除")
+            Button { withAnimation { store.undeleteFavorite(item.id) } } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.teal)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("撤销删除")
         }
         .padding(14)
         .background(

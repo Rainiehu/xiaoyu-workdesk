@@ -353,6 +353,8 @@ extension View {
 struct DeletedTodoRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
+    /// 撤销钮的颜色，随所在那一屏的 tint —— 死者的占位也穿这一屏的衣裳。
+    let tint: Color
 
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
@@ -360,10 +362,14 @@ struct DeletedTodoRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Button("撤销") { withAnimation { store.undeleteTodo(todo.id) } }
-                .buttonStyle(.plain)
-                .fontWeight(.semibold)
-                .foregroundStyle(.teal)
+            Button { withAnimation { store.undeleteTodo(todo.id) } } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(tint)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .todoRowChrome()
         .background(

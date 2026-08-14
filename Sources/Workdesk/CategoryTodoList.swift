@@ -80,7 +80,7 @@ struct CategoryTodoList: View {
                 ForEach(todos) { todo in
                     // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
                     if todo.isDeleted {
-                        DeletedTodoRow(todo: todo)
+                        DeletedTodoRow(todo: todo, tint: category.color.tint)
                     } else {
                         TodoRow(todo: todo, tint: category.color.tint)
                         // 子树常开，就摊在行底下。右列也一样 —— 完成的事带着它的步骤

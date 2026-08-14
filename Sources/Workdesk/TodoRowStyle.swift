@@ -89,10 +89,12 @@ struct TodoDeleteButton: View {
 /// 占位跟着死者的原位走，一行待办活在几处（轴、分类视图、未排期列），占位就在几处，
 /// 见 ADR-0007。窗口一关它自己塌掉（`Store` 把记录搬进池子，行就不在列表里了）。
 ///
-/// 字号与所在列同步：外面罩什么字号，正文和「撤销」就是什么字号 —— 与 `TodoText` 同一条规矩。
+/// 字号与所在列同步：外面罩什么字号，正文和撤销钮就是什么字号 —— 与 `TodoText` 同一条规矩。
 struct DeletedTodoRow: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
+    /// 撤销钮的颜色，随所在那一屏的 tint —— 死者的占位也穿这一屏的衣裳。
+    let tint: Color
 
     var body: some View {
         HStack(spacing: TodoRowLayout.spacing) {
@@ -100,11 +102,14 @@ struct DeletedTodoRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Button("撤销") { withAnimation { store.undeleteTodo(todo.id) } }
-                .buttonStyle(.plain)
-                .fontWeight(.semibold)
-                .foregroundStyle(.teal)
-                .help("撤销删除")
+            Button { withAnimation { store.undeleteTodo(todo.id) } } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(tint)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("撤销删除")
         }
         .padding(.horizontal, TodoRowLayout.horizontalInset)
         .padding(.vertical, TodoRowLayout.verticalInset)
