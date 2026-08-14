@@ -10,6 +10,9 @@ struct UsageCard: View {
     /// 每分钟自己重扫一次。窗口以小时计，这个频率足够，也不至于让界面上的数字像秒表。
     @State private var ticker = Date.now
 
+    /// 刷新图标转到的角度。只增不减、永远停在整圈上 —— 箭头不会歪着趴在卡片上。
+    @State private var spinAngle = 0.0
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             header
@@ -55,11 +58,25 @@ struct UsageCard: View {
             // 手动点就是要它现在去问，越过接口自己那套节奏。
             Button { store.refreshUsage(force: true) } label: {
                 Image(systemName: "arrow.clockwise").font(.caption2)
+                    .rotationEffect(.degrees(spinAngle))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .disabled(store.usageLoading)
             .help("立刻重新扫描并查限流")
+            // 扫着、问着的那一会儿图标转圈 —— 点了按钮界面却纹丝不动，看着就像坏的。
+            // 每分钟的例行重扫转的也是这同一个圈：图标只说一件事，「这一刻正在干活」。
+            .onChange(of: store.usageLoading) { _, loading in
+                if loading {
+                    withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
+                        spinAngle += 360
+                    }
+                } else {
+                    // 快扫描一眨眼就完，转不满一圈就停会看不出动过 ——
+                    // 收尾补上完整一圈，顺带把 repeatForever 顶掉。
+                    withAnimation(.linear(duration: 0.4)) { spinAngle += 360 }
+                }
+            }
         }
     }
 
