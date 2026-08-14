@@ -187,7 +187,16 @@ struct TodoText: View {
                 // 再挪。光标的接力见 `TreeComposer.resumeEditingID`。
                 // Shift+Tab 在 AppKit 里送来的不是带 shift 的 tab，是 backtab（0x19）——
                 // 按键名匹配接不住它，所以这儿接全部按键自己认。
+                //
+                // 删光了字再按一下删除，删的就是这条待办。「改成空白不算改」照旧 ——
+                // 空着回车或点走，原文留着；但空行上的再一击是明确的删除表态，
+                // 走软删除、开撤销窗口，与行上的删除钮同一条路。
                 .onKeyPress(phases: .down) { press in
+                    if press.key == .delete, editing.draft.isEmpty {
+                        editing.end()
+                        withAnimation { store.deleteTodo(todo) }
+                        return .handled
+                    }
                     let backtab = press.characters == "\u{19}"
                     guard press.key == .tab || backtab else { return .ignored }
                     let move = (backtab || press.modifiers.contains(.shift)) ? onOutdent : onIndent
