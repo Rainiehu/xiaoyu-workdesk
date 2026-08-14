@@ -46,29 +46,6 @@ struct SubTodoTests {
         }
     }
 
-    @Test("进度只数直接子女的活人：孙辈不算、删除态不算、没孩子是 nil")
-    func progressCountsDirectLivingChildren() throws {
-        try withTemporaryDirectory { dir in
-            let store = Store(directory: dir)
-            let work = try #require(store.addCategory("工作"))
-            store.addTodo("装机", in: work.id)
-            let parent = try #require(store.todos.first)
-            store.addSubTodo("买配件", under: parent.id)
-            store.addSubTodo("装系统", under: parent.id)
-            let steps = store.children(of: parent.id)
-            store.addSubTodo("挑内存", under: steps[0].id)
-            store.toggleTodo(steps[0])
-
-            #expect(store.childProgress(of: parent.id)! == (done: 1, total: 2))
-            // 孙辈是下一层的进度，不掺在父的数里。
-            #expect(store.childProgress(of: steps[0].id)! == (done: 0, total: 1))
-            #expect(store.childProgress(of: steps[1].id) == nil)
-
-            store.deleteTodo(steps[1])
-            #expect(store.childProgress(of: parent.id)! == (done: 1, total: 1))
-        }
-    }
-
     @Test("勾是解耦的：子全勾完父不动，勾父子也不动")
     func checkmarksStayUncoupled() throws {
         try withTemporaryDirectory { dir in

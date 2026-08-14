@@ -82,12 +82,9 @@ private struct UnscheduledCategoryGroup: View {
                         .font(.callout)
                 } else {
                     UnscheduledRow(todo: todo, tint: group.category.color.tint)
-                    // 展开的子树就挂在行底下 —— 三处父行都能展开，这一列也不例外。
-                    // 窄列的字号：树跟着这一列用 callout。
-                    if store.isExpanded(todo.id) {
-                        SubTodoTree(parentID: todo.id, tint: group.category.color.tint)
-                            .font(.callout)
-                    }
+                    // 子树常开，就摊在行底下 —— 这一列也不例外。窄列的树跟着用 callout。
+                    SubTodoTree(parentID: todo.id, tint: group.category.color.tint)
+                        .font(.callout)
                 }
             }
         }
@@ -126,8 +123,6 @@ private struct UnscheduledRow: View {
             // 字号罩在外面而不是写在 `Text` 上：改写时那格换成输入框，两种模样的字因此一样大。
             TodoText(todo: todo, editing: $editing)
                 .font(.callout)
-
-            TodoTreeBadge(todo: todo)
 
             Spacer(minLength: 8)
 

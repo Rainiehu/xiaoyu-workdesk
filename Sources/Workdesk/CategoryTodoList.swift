@@ -83,11 +83,9 @@ struct CategoryTodoList: View {
                         DeletedTodoRow(todo: todo)
                     } else {
                         TodoRow(todo: todo, tint: category.color.tint)
-                        // 展开的子树就挂在行底下。右列也一样 —— 三处父行都能展开，
-                        // 完成的事带着它的步骤一起退到背景里。
-                        if store.isExpanded(todo.id) {
-                            SubTodoTree(parentID: todo.id, tint: category.color.tint)
-                        }
+                        // 子树常开，就摊在行底下。右列也一样 —— 完成的事带着它的步骤
+                        // 一起退到背景里。
+                        SubTodoTree(parentID: todo.id, tint: category.color.tint)
                         // 改写中回车「再开一行」的输入就开在这儿 —— 平时什么也不画。
                         SiblingInsertRow(anchor: todo)
                     }
@@ -180,8 +178,6 @@ private struct TodoRow: View {
                     ? { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil,
                 onReturn: reorderable ? { composer.insertingAfter = todo.id } : nil
             )
-
-            TodoTreeBadge(todo: todo)
 
             Spacer(minLength: 8)
 

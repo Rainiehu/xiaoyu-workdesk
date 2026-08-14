@@ -2,11 +2,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WorkdeskCore
 
-/// 子待办的树在 Mac 上的全部家当：父行上的进度记号（也是展开入口）、展开的子树、
-/// 树尾的追加入口、以及「落间换位、落身入怀」的落点判定。
+/// 子待办的树在 Mac 上的全部家当：常开的子树、回车/右键开出的临时输入行、
+/// 以及「落间换位、落身入怀」的落点判定。
 ///
-/// 三处的父行（分类视图两列、轴、未排期列）都能就地展开，默认收起 —— 「哪几件事只在
-/// 哪一屏能做」是一条要人记住的规矩，不立这种规矩，见 ADR-0003 的教训。
+/// 树**常开**：子树就摊在父行底下，三处（分类视图两列、轴、未排期列）一个样 ——
+/// 没有折叠、没有进度记号（步骤都在眼前，数字是重复），也没有常驻的追加入口
+/// （加步骤走右键「添加子待办」，点了才浮出一行输入）。
 /// 子行有打勾、删除、改写、拖拽四样，与普通行一致；排期入口和「移到分类」在子行上
 /// **不存在** —— 不是禁用置灰，是那一格空着，沿用「三处的行同一副结构，差别只在
 /// 哪几格是空的」。
@@ -27,48 +28,14 @@ final class TreeComposer {
     var insertingAfter: TodoItem.ID?
 }
 
-// MARK: - 进度记号
+// MARK: - 常开的子树
 
-/// 父行上那个安静的进度，同时是展开/收起的入口：「3/5 ›」，点一下箭头转直、子树铺开。
-/// 一格双职 —— 进度说明里头有步骤，有步骤才有得展开，两件事本来就是一件。
-/// 灰调不着色：一屏上着色的地方要数得过来，这一格不在其列。
-/// 没有孩子就整个不画 —— 空树没有进度，也没有可展开的东西。
-struct TodoTreeBadge: View {
-    @Environment(Store.self) private var store
-    let todo: TodoItem
-
-    var body: some View {
-        if let progress = store.childProgress(of: todo.id) {
-            let expanded = store.isExpanded(todo.id)
-            Button {
-                withAnimation(.easeOut(duration: 0.18)) { store.toggleExpanded(todo.id) }
-            } label: {
-                HStack(spacing: 3) {
-                    Text("\(progress.done)/\(progress.total)")
-                        .font(.caption)
-                        .monospacedDigit()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(.quaternary.opacity(0.45)))
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .help(expanded ? "收起步骤" : "展开步骤")
-        }
-    }
-}
-
-// MARK: - 展开的子树
-
-/// 一条待办名下展开的子树：子行一层层铺，每层缩进一档，末尾一行淡淡的追加入口。
+/// 一条待办名下的子树：子行一层层铺，每层缩进一档。常开 —— 没有折叠这回事。
+/// 没有孩子、也没在添步骤时，整个不占地方。
 /// 删除态的子行是原位占位，与三处的行同一条规矩（ADR-0007）。
 struct SubTodoTree: View {
     @Environment(Store.self) private var store
+    @Environment(TreeComposer.self) private var composer
     let parentID: TodoItem.ID
     /// 子行打勾后圈填的颜色，随所在那一屏：分类视图与未排期列是分类色，轴上是青 ——
     /// 与顶层行同一条纪律，树不另立规矩。
@@ -79,21 +46,22 @@ struct SubTodoTree: View {
     static let indent: CGFloat = TodoRowLayout.spacing + 16
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(store.children(of: parentID)) { child in
-                if child.isDeleted {
-                    DeletedTodoRow(todo: child)
-                } else {
-                    SubTodoRow(todo: child, tint: tint)
-                    if store.isExpanded(child.id) {
+        let children = store.children(of: parentID)
+        if !children.isEmpty || composer.composingUnder == parentID {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(children) { child in
+                    if child.isDeleted {
+                        DeletedTodoRow(todo: child)
+                    } else {
+                        SubTodoRow(todo: child, tint: tint)
                         SubTodoTree(parentID: child.id, tint: tint)
+                        SiblingInsertRow(anchor: child)
                     }
-                    SiblingInsertRow(anchor: child)
                 }
+                SubTodoAppendRow(parentID: parentID)
             }
-            SubTodoAppendRow(parentID: parentID)
+            .padding(.leading, Self.indent)
         }
-        .padding(.leading, Self.indent)
     }
 }
 
@@ -120,8 +88,6 @@ private struct SubTodoRow: View {
             )
             .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
 
-            TodoTreeBadge(todo: todo)
-
             Spacer(minLength: 8)
 
             // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
@@ -145,7 +111,8 @@ private struct SubTodoRow: View {
     }
 }
 
-/// 树尾那行淡淡的追加入口：平时是一行「＋ 添一步」，点了当场变成输入框。
+/// 右键「添加子待办」开出的那行输入，落在孩子们的末尾。平时什么也不画 ——
+/// 树上没有常驻的追加入口，入口在菜单里。
 /// 回车记下这一步、原位再开一行 —— 「先这个、再这个、然后那个」的连写流靠它接住；
 /// Esc 或点到别处收场，写了一半的字照样记下（记事没有「没保存」这个下场）。
 private struct SubTodoAppendRow: View {
@@ -173,22 +140,6 @@ private struct SubTodoAppendRow: View {
             }
             .padding(.horizontal, TodoRowLayout.horizontalInset)
             .padding(.vertical, TodoRowLayout.verticalInset)
-        } else {
-            Button {
-                composer.composingUnder = parentID
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 9, weight: .medium))
-                    Text("添一步")
-                        .font(.caption)
-                }
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, TodoRowLayout.horizontalInset)
-                .padding(.vertical, 3)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
         }
     }
 

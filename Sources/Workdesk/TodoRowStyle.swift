@@ -185,8 +185,12 @@ struct TodoText: View {
                 .onAppear { focused = true }
                 // Tab 缩进、Shift+Tab 升一级：先把改到一半的字收下（挪位置不丢字），
                 // 再挪。光标的接力见 `TreeComposer.resumeEditingID`。
-                .onKeyPress(keys: [.tab], phases: .down) { press in
-                    let move = press.modifiers.contains(.shift) ? onOutdent : onIndent
+                // Shift+Tab 在 AppKit 里送来的不是带 shift 的 tab，是 backtab（0x19）——
+                // 按键名匹配接不住它，所以这儿接全部按键自己认。
+                .onKeyPress(phases: .down) { press in
+                    let backtab = press.characters == "\u{19}"
+                    guard press.key == .tab || backtab else { return .ignored }
+                    let move = (backtab || press.modifiers.contains(.shift)) ? onOutdent : onIndent
                     guard let move else { return .ignored }
                     commit()
                     move()
@@ -241,8 +245,7 @@ struct TodoRowMenuItems: View {
     var body: some View {
         Button("改写") { editing.begin(todo) }
         Button("添加子待办") {
-            // 当场展开并把追加输入摆到手边 —— 加的那步得看得见、接着写。
-            store.expand(todo.id)
+            // 树常开，点了当场在孩子们末尾浮出一行输入，接着写。
             composer.composingUnder = todo.id
         }
         if todo.parentID != nil {

@@ -72,10 +72,6 @@ public final class Store {
     /// 这是「怎么看」的习惯，不是数据 —— 随偏好落盘、不进同步，两台机器各看各的。
     public private(set) var hidesCompletedOnTimeline = false
 
-    /// 展开着子树的那些待办。与那只眼同一个待遇：习惯不是数据，随偏好落盘、不进同步。
-    /// 三处的行共享这一份 —— 在轴上展开的树，切到分类视图它也开着。
-    public private(set) var expandedTodoIDs: Set<TodoItem.ID> = []
-
     /// 同步的账本：本地增删改先记账，云端慢慢结清。待办、分类与收藏都记在这一本上。
     /// 没有同步引擎的构建里它照记不误 —— 账不会丢，哪天引擎接上了照账补发。
     public private(set) var syncLog = SyncChangeLog()
@@ -117,7 +113,6 @@ public final class Store {
         let preferences: Preferences? = load(Self.preferencesFile)
         chosenRecordingCategoryID = preferences?.recordingCategoryID
         hidesCompletedOnTimeline = preferences?.hidesCompletedOnTimeline ?? false
-        expandedTodoIDs = Set(preferences?.expandedTodoIDs ?? [])
         sweepInterruptedDeletions()
         seedOrders()
     }
@@ -375,28 +370,6 @@ public final class Store {
         savePreferences()
     }
 
-    /// 这条待办的子树展开着吗。默认收起 —— 轴上一屏几十行，不该因为谁有步骤就成了一片树。
-    public func isExpanded(_ id: TodoItem.ID) -> Bool {
-        expandedTodoIDs.contains(id)
-    }
-
-    /// 拨一下展开/收起。选择跨重启保留，三处共享。
-    public func toggleExpanded(_ id: TodoItem.ID) {
-        if expandedTodoIDs.contains(id) {
-            expandedTodoIDs.remove(id)
-        } else {
-            expandedTodoIDs.insert(id)
-        }
-        savePreferences()
-    }
-
-    /// 把这条待办展开（已开着就什么也不做）。「添加子待办」用它 —— 加的那步得当场看得见。
-    public func expand(_ id: TodoItem.ID) {
-        guard !expandedTodoIDs.contains(id) else { return }
-        expandedTodoIDs.insert(id)
-        savePreferences()
-    }
-
     /// 沙漏视图右列要的分组：还没排期的未完成待办，按分类分开，分类的顺序就是 tab 栏上的顺序。
     ///
     /// 它们不在那条轴上（轴按计划日铺），却也不该因此看不见 —— 「总得做但不急」是个正常状态，
@@ -626,21 +599,10 @@ public final class Store {
 
     // MARK: - 子待办的树
 
-    /// 一条待办的直接子待办，按兄弟间的位置从上到下 —— 三处展开的树都照这份铺。
-    /// 里头可能夹着还开着撤销窗口的删除态记录（占位靠它站在原位），与 `todos(in:)` 同一副脾气；
-    /// 数进度用 `childProgress(of:)`，它只数活人。
+    /// 一条待办的直接子待办，按兄弟间的位置从上到下 —— 三处常开的树都照这份铺。
+    /// 里头可能夹着还开着撤销窗口的删除态记录（占位靠它站在原位），与 `todos(in:)` 同一副脾气。
     public func children(of id: TodoItem.ID) -> [TodoItem] {
         Self.ordered(todos.filter { $0.parentID == id })
-    }
-
-    /// 父行上那个安静的进度：直接子女里勾了几个、共几个（删除态的不算数）。
-    /// 只数直接子女，不数全后代 —— 每一层只替自己的孩子说话，更深的进度展开了自然看见。
-    /// 一个孩子都没有就是 `nil`，视图层照着它决定画不画。
-    /// 勾是解耦的：孩子全勾完也不推父，「齐了、该勾父了」由人自己看出来。
-    public func childProgress(of id: TodoItem.ID) -> (done: Int, total: Int)? {
-        let kids = todos.filter { $0.parentID == id && !$0.isDeleted }
-        guard !kids.isEmpty else { return nil }
-        return (kids.filter(\.done).count, kids.count)
     }
 
     /// 在一条待办下面添一步。子待办生在**兄弟末尾** —— 步骤有天然先后，人是按
@@ -1561,8 +1523,7 @@ public final class Store {
     private func savePreferences() {
         save(Preferences(
             recordingCategoryID: chosenRecordingCategoryID,
-            hidesCompletedOnTimeline: hidesCompletedOnTimeline,
-            expandedTodoIDs: expandedTodoIDs.sorted { $0.uuidString < $1.uuidString }
+            hidesCompletedOnTimeline: hidesCompletedOnTimeline
         ), to: Self.preferencesFile)
     }
 
