@@ -22,19 +22,28 @@ let package = Package(
             path: "Sources/WorkdeskCore",
             swiftSettings: swift5Mode
         ),
+        // 两端 UI 逐字共用的 SwiftUI 件：纯几何（眼睛）、纯算法（轴的垫高）、
+        // 逐字同款的小视图（移到分类菜单）。差别只在呈现的仍各归各的 target（ADR-0006）；
+        // 与呈现无关、靠抄写对齐的才收进这儿 —— 抄写迟早漂成两副脾气。
+        .target(
+            name: "WorkdeskUI",
+            dependencies: ["WorkdeskCore"],
+            path: "Sources/WorkdeskUI",
+            swiftSettings: swift5Mode
+        ),
         // iOS 界面。住在包里而不是 Xcode 工程里，好让加减 UI 文件不必手改 pbxproj；
         // 文件整个用 #if os(iOS) 圈住，在 macOS 上编成空模块，swift test 因此照跑。
         // Xcode 那边只剩一个 @main 薄壳（ios/），链接这个产品。
         .target(
             name: "WorkdeskiOS",
-            dependencies: ["WorkdeskCore"],
+            dependencies: ["WorkdeskCore", "WorkdeskUI"],
             path: "Sources/WorkdeskiOS",
             swiftSettings: swift5Mode
         ),
         // macOS 界面与应用入口。
         .executableTarget(
             name: "Workdesk",
-            dependencies: ["WorkdeskCore"],
+            dependencies: ["WorkdeskCore", "WorkdeskUI"],
             path: "Sources/Workdesk",
             swiftSettings: swift5Mode
         ),

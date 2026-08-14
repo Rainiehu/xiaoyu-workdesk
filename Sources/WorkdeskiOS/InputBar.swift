@@ -36,15 +36,15 @@ struct InputBar<Trailing: View>: View {
     }
 }
 
-/// 记到哪个分类。列出全部分类，选中的那个由 `Store` 记着，跨重启保留。
-/// 与 Mac 的 `RecordingCategoryPicker` 同一副：光板的名字加一个小箭头，不抢眼。
+/// 记到哪个分类。列的是活人名单（`livingCategories`）—— 删除态的正从一切界面消失，
+/// 不该在这儿露面。与 Mac 的 `RecordingCategoryPicker` 同一副：光板的名字加一个小箭头，不抢眼。
 struct RecordingCategoryPicker: View {
     @Environment(Store.self) private var store
     let current: Category
 
     var body: some View {
         Menu {
-            ForEach(store.categories) { category in
+            ForEach(store.livingCategories) { category in
                 Button {
                     store.chooseRecordingCategory(category.id)
                 } label: {

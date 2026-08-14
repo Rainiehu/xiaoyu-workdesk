@@ -17,8 +17,9 @@ struct CategoryTodoList: View {
     @FocusState private var inputFocused: Bool
 
     /// 右列的宽度。定死一个值而不是按比例分 —— 左列于是随窗口一起长，
-    /// 「哪边是主角」不随窗口宽度动摇。
-    private let finishedColumnWidth: CGFloat = 264
+    /// 「哪边是主角」不随窗口宽度动摇。引用同一个常量而不是各写一遍 264：
+    /// 两处的右列看着是同一块东西，就该真是同一个数。
+    private let finishedColumnWidth = UnscheduledColumn.width
 
     /// 左列的内容宽度上限。窗口再宽，一行字也不跟着摊开。
     private let unfinishedColumnMaxWidth: CGFloat = 620
@@ -168,18 +169,12 @@ private struct TodoRow: View {
                 store.toggleTodo(todo)
             }
 
-            TodoText(
-                todo: todo, editing: $editing,
-                onIndent: reorderable
-                    ? { if store.indentTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil,
-                onOutdent: reorderable
-                    ? { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } } : nil,
-                onReturn: reorderable ? {
-                    if let newID = store.addTodo("", after: todo.id) {
-                        composer.resumeEditingID = newID
-                    }
-                } : nil
-            )
+            // 左列接树编辑的三下键；右列不由人排，三下都不接，回车只收改写。
+            if reorderable {
+                TodoText(todo: todo, editing: $editing, tree: store, composer: composer)
+            } else {
+                TodoText(todo: todo, editing: $editing)
+            }
 
             Spacer(minLength: 8)
 
@@ -210,20 +205,8 @@ private struct TodoRow: View {
         // 落间换位、落身入怀：缝亮线、身亮圈。右列不接缝 —— 那儿的顺序不由人排，
         // 行上只剩「入怀」一件事。
         .todoTreeDropTarget(todo, allowsGaps: reorderable)
-        .onAppear {
-            // Tab/Shift+Tab 挪完位置的那一行在这儿续上改写 —— 见 `TreeComposer.resumeEditingID`。
-            if composer.resumeEditingID == todo.id {
-                composer.resumeEditingID = nil
-                editing.begin(todo)
-            }
-        }
-        // 删行把光标退回来时，这一行早就在屏上了，onAppear 不会再响 —— 变化也得接。
-        .onChange(of: composer.resumeEditingID) { _, id in
-            if id == todo.id {
-                composer.resumeEditingID = nil
-                editing.begin(todo)
-            }
-        }
+        // 光标的接力（Tab/Shift+Tab 挪完、删行退回）收在 `resumesTreeEditing` 一处。
+        .resumesTreeEditing(todo, editing: $editing)
     }
 
 }

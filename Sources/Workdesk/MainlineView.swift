@@ -474,25 +474,7 @@ extension CategoryColor {
         })
     }
 
-    /// 这个颜色叫什么。选色盘上的色块看得见颜色，不写字 —— 名字是给悬停提示和读屏用的。
-    var label: String {
-        switch self {
-        case .red: "红"
-        case .orange: "橙"
-        case .amber: "琥珀"
-        case .lime: "黄绿"
-        case .green: "绿"
-        case .mint: "薄荷"
-        case .teal: "青"
-        case .cyan: "天蓝"
-        case .blue: "蓝"
-        case .indigo: "靛蓝"
-        case .purple: "紫"
-        case .fuchsia: "品红"
-        case .pink: "粉"
-        case .slate: "石墨"
-        }
-    }
+    // 色名（`label`）在核心的 `Models.swift` 上，两端共用 —— 这儿不再抄一份。
 }
 
 extension NSColor {

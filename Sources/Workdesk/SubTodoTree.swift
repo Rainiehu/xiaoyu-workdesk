@@ -56,7 +56,7 @@ struct SubTodoTree: View {
     }
 }
 
-/// 子待办的一行：圈 → 正文 → 进度记号 → Spacer → 删除。
+/// 子待办的一行：圈 → 正文 → Spacer → 删除。
 /// 排期入口与「移到分类」这两格是空的 —— 步骤没有自己的计划日和分类，不是禁用，是无此事。
 /// 打勾、删除、改写、拖拽与普通行一致；改写中 Tab 缩进、Shift+Tab 升一级。
 private struct SubTodoRow: View {
@@ -71,17 +71,8 @@ private struct SubTodoRow: View {
         HStack(spacing: TodoRowLayout.spacing) {
             TodoToggle(done: todo.done, tint: tint) { store.toggleTodo(todo) }
 
-            TodoText(
-                todo: todo, editing: $editing,
-                onIndent: { if store.indentTodo(todo.id) { composer.resumeEditingID = todo.id } },
-                onOutdent: { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } },
-                onReturn: {
-                    if let newID = store.addTodo("", after: todo.id) {
-                        composer.resumeEditingID = newID
-                    }
-                }
-            )
-            .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+            TodoText(todo: todo, editing: $editing, tree: store, composer: composer)
+                .foregroundStyle(todo.done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
 
             Spacer(minLength: 8)
 
@@ -96,20 +87,8 @@ private struct SubTodoRow: View {
         .todoRowEditing(todo, editing: $editing)
         .draggable(DraggedTodo(id: todo.id)) { TodoDragPreview(text: todo.text, tint: tint) }
         .todoTreeDropTarget(todo, allowsGaps: true)
-        .onAppear {
-            // Tab/Shift+Tab 挪完位置的那一行在这儿续上改写 —— 见 `TreeComposer.resumeEditingID`。
-            if composer.resumeEditingID == todo.id {
-                composer.resumeEditingID = nil
-                editing.begin(todo)
-            }
-        }
-        // 删行把光标退回来时，这一行早就在屏上了，onAppear 不会再响 —— 变化也得接。
-        .onChange(of: composer.resumeEditingID) { _, id in
-            if id == todo.id {
-                composer.resumeEditingID = nil
-                editing.begin(todo)
-            }
-        }
+        // 光标的接力（Tab/Shift+Tab 挪完、删行退回）收在 `resumesTreeEditing` 一处。
+        .resumesTreeEditing(todo, editing: $editing)
     }
 }
 

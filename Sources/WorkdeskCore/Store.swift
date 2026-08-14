@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 /// 一扇还开着的撤销窗口：一次删除对应一扇，各自倒计时、各自撤。
 /// 视图层不拿它画占位（占位就是数组里带记号的那条记录），只有 ⌘Z 的从新到旧靠它排队。
@@ -89,6 +90,12 @@ public final class Store {
     /// 谁在听、听了做什么，都不是它的事。
     @ObservationIgnored var syncLogDidChange: (() -> Void)?
 
+    /// 启动加载时有文件读坏被挪去尸检。同步引擎看这面旗：增量 token 说的是
+    /// 一个不完整的库，得作废、全量重抓 —— 丢的记录从云上回来。
+    public private(set) var hadCorruptFilesOnLoad = false
+
+    private static let logger = Logger(subsystem: "cc.huxiaoyu.workdesk", category: "store")
+
     /// 正常运行时的存储位置。只算路径，不建目录 —— 建目录是 `init` 的事。
     public nonisolated static var defaultDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -103,7 +110,7 @@ public final class Store {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         categories = load(Self.categoriesFile) ?? []
         todos = load(Self.todosFile) ?? []
-        favorites = load("favorites.json") ?? []
+        favorites = load(Self.favoritesFile) ?? []
         deletedTodos = load(Self.deletedTodosFile) ?? []
         deletedCategories = load(Self.deletedCategoriesFile) ?? []
         deletedFavorites = load(Self.deletedFavoritesFile) ?? []
@@ -532,6 +539,17 @@ public final class Store {
         update(item.id) { $0.plannedOn = nil }
     }
 
+    /// 排到这一天；已经排在这一天的，这一下就是取消 —— 排期与取消是同一下点击的两面，
+    /// 日历面板和快捷键（今天/明天/下周）同一条规矩，两端同一份。
+    /// 「是不是同一天」用 `Calendar` 比 —— 底下存着时刻，`==` 会把同一天认成两天。
+    public func togglePlannedDay(_ item: TodoItem, to day: Date) {
+        if let planned = item.plannedOn, Calendar.current.isDate(planned, inSameDayAs: day) {
+            clearPlannedDay(item)
+        } else {
+            setPlannedDay(day, for: item)
+        }
+    }
+
     /// 把一条待办改到另一个分类。归类的想法会变，事情该能换地方；这也是把一个分类腾空的那条路 ——
     /// 非空分类删不掉，没有它就永远删不掉。
     ///
@@ -617,6 +635,53 @@ public final class Store {
         }
     }
 
+    // MARK: - 拖拽会话的悔棋
+
+    /// 拖起那一刻的样子：计划日与窝内位次。iOS 的拖拽是「悬停即落账」——
+    /// 列表本身就是预览，账当场就记；可拖拽也可能取消（拖回原处松手、来电打断），
+    /// 那时靠这份基线原路退回。会话态，不落盘。
+    private struct TodoDragBaseline {
+        var id: TodoItem.ID
+        var group: SiblingGroup
+        var plannedOn: Date?
+        var index: Int
+    }
+
+    @ObservationIgnored private var dragBaseline: TodoDragBaseline?
+
+    /// 拖起一条待办：记下基线，取消时按它退回。每场拖拽记新的一份，上一场的作废。
+    public func beginTodoDrag(_ id: TodoItem.ID) {
+        guard let item = todos.first(where: { $0.id == id }) else {
+            dragBaseline = nil
+            return
+        }
+        let queue = Self.ordered(siblings(of: item.siblingGroup))
+        dragBaseline = TodoDragBaseline(
+            id: id, group: item.siblingGroup, plannedOn: item.plannedOn,
+            index: queue.firstIndex { $0.id == id } ?? 0
+        )
+    }
+
+    /// 拖拽取消（没落在任何落点上就散了）：悬停一路记下的账按基线退回。
+    /// 只退悬停会改的两样 —— 计划日与窝内位次；出窝的挪动（入怀、落缝、换分类）
+    /// 都发生在松手那一刻，取消了就根本没发生过。落定的拖拽不走这儿。
+    public func cancelTodoDrag(_ id: TodoItem.ID) {
+        guard let baseline = dragBaseline, baseline.id == id else { return }
+        dragBaseline = nil
+        guard let item = todos.first(where: { $0.id == id }), !item.isDeleted else { return }
+        if item.plannedOn != baseline.plannedOn {
+            update(id) { $0.plannedOn = baseline.plannedOn }
+        }
+        guard let fresh = todos.first(where: { $0.id == id }),
+              fresh.siblingGroup == baseline.group else { return }
+        var queue = Self.ordered(siblings(of: baseline.group))
+        guard queue.firstIndex(where: { $0.id == id }) != baseline.index else { return }
+        queue.removeAll { $0.id == id }
+        queue.insert(fresh, at: min(baseline.index, queue.count))
+        renumber(baseline.group, as: queue)
+        saveTodos()
+    }
+
     // MARK: - 子待办的树
 
     /// 一条待办的直接子待办，按兄弟间的位置从上到下 —— 三处常开的树都照这份铺。
@@ -692,6 +757,12 @@ public final class Store {
 
     private func place(_ id: TodoItem.ID, at targetID: TodoItem.ID, offset: Int) -> Bool {
         guard id != targetID, let target = todos.first(where: { $0.id == targetID }) else { return false }
+        // 顶层的缝只管换位，不管换窝：改归属是把它拖到 tab 上的事，一次只动一样
+        // （ADR-0003）—— 未排期列里跨分类组的缝不接。子树里的缝随树走，
+        // 入怀（落在行身上）走的是 `nestTodo`，不从这儿过。
+        if target.parentID == nil,
+           let item = todos.first(where: { $0.id == id }),
+           item.categoryID != target.categoryID { return false }
         let queue = Self.ordered(siblings(of: target.siblingGroup)).filter { $0.id != id }
         guard let at = queue.firstIndex(where: { $0.id == targetID }) else { return false }
         return relocate(id, under: target.parentID, in: target.categoryID, at: at + offset)
@@ -874,16 +945,25 @@ public final class Store {
         }
         // 窗口已关、记录在池子里：本地界面到不了这儿，同步的复活走的是这条路。
         // 只救这一条 —— 云端的复活一条记录一条记录地来，各救各的。
-        guard let j = deletedTodos.firstIndex(where: { $0.id == id }) else { return }
+        guard let item = reviveFromPool(id) else { return }
+        undeleteCategoryIfNeeded(item.categoryID)
+        reviveAncestorsIfNeeded(from: item.parentID)
+    }
+
+    /// 从池子里救一条回来：摘记号、按创建时刻插回活人堆、落盘记账。
+    /// 只救这一条自己 —— 分类与祖先链由调用处按不变式另行安排。
+    /// - Returns: 救回的那条（接着走它的祖先链时用），池子里没有就是 `nil`。
+    @discardableResult
+    private func reviveFromPool(_ id: TodoItem.ID) -> TodoItem? {
+        guard let j = deletedTodos.firstIndex(where: { $0.id == id }) else { return nil }
         var item = deletedTodos.remove(at: j)
         saveDeletedTodos()
         item.deletedAt = nil
-        undeleteCategoryIfNeeded(item.categoryID)
-        reviveAncestorsIfNeeded(from: item.parentID)
         let at = todos.firstIndex { $0.createdAt > item.createdAt } ?? todos.endIndex
         todos.insert(item, at: at)
         saveTodos()
         logSyncChange { $0.recordSave(item.changeEntry) }
+        return item
     }
 
     /// 不变式的另一半：活着的子，父必须活着 —— 哪条路救活一条待办，祖先链就跟着复活。
@@ -903,15 +983,8 @@ public final class Store {
                 }
                 undeleteCategoryIfNeeded(todos[i].categoryID)
                 next = todos[i].parentID
-            } else if let j = deletedTodos.firstIndex(where: { $0.id == id }) {
-                var item = deletedTodos.remove(at: j)
-                saveDeletedTodos()
-                item.deletedAt = nil
+            } else if let item = reviveFromPool(id) {
                 undeleteCategoryIfNeeded(item.categoryID)
-                let at = todos.firstIndex { $0.createdAt > item.createdAt } ?? todos.endIndex
-                todos.insert(item, at: at)
-                saveTodos()
-                logSyncChange { $0.recordSave(item.changeEntry) }
                 next = item.parentID
             } else {
                 // 父根本不在本地（记录还没送到）：这儿救不了，孤儿机制管到底。
@@ -1538,6 +1611,7 @@ public final class Store {
     /// 已经废弃：不读取、不转换，装着旧数据的机器首次运行就是空状态。
     private static let todosFile = "todos-v2.json"
     /// 同步的账本。与数据同目录、分开存 —— 它说的是「欠云端什么」，不是数据本身。
+    private static let favoritesFile = "favorites.json"
     private static let syncLogFile = "sync-changes.json"
     /// 同步的记性：影子副本与殉葬品。同样不是数据本身 —— 丢了顶多让下一次冲突
     /// 退回整条后写胜、让一次复活少了料，本机的待办一条不少。
@@ -1553,7 +1627,7 @@ public final class Store {
 
     private func saveCategories() { save(categories, to: Self.categoriesFile) }
     private func saveTodos() { save(todos, to: Self.todosFile) }
-    private func saveFavorites() { save(favorites, to: "favorites.json") }
+    private func saveFavorites() { save(favorites, to: Self.favoritesFile) }
     private func saveDeletedTodos() { save(deletedTodos, to: Self.deletedTodosFile) }
     private func saveDeletedCategories() { save(deletedCategories, to: Self.deletedCategoriesFile) }
     private func saveDeletedFavorites() { save(deletedFavorites, to: Self.deletedFavoritesFile) }
@@ -1569,18 +1643,33 @@ public final class Store {
 
     private func load<T: Decodable>(_ name: String) -> T? {
         let url = directory.appendingPathComponent(name)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .iso8601
-        return try? dec.decode(T.self, from: data)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: url)
+            let dec = JSONDecoder()
+            dec.dateDecodingStrategy = .iso8601
+            return try dec.decode(T.self, from: data)
+        } catch {
+            // 文件在、读不出：不是「没有」，是「坏了」。挪到一边留尸检、立旗子 ——
+            // 同步引擎见旗子会放弃增量 token 全量重抓，丢的记录从云上回来。
+            // 悄悄当空文件用才是最坏的下场：本地空库配着一枚说「都同步过了」的 token。
+            Self.logger.error("读取 \(name, privacy: .public) 失败，挪去尸检: \(error)")
+            try? FileManager.default.moveItem(at: url, to: directory.appendingPathComponent(name + ".corrupt"))
+            hadCorruptFilesOnLoad = true
+            return nil
+        }
     }
 
     private func save<T: Encodable>(_ value: T, to name: String) {
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? enc.encode(value) {
-            try? data.write(to: directory.appendingPathComponent(name), options: .atomic)
+        do {
+            let data = try enc.encode(value)
+            try data.write(to: directory.appendingPathComponent(name), options: .atomic)
+        } catch {
+            // 写不进去（磁盘满、权限没了）帮不上忙，但至少留下一声 —— 静默丢改动最难查。
+            Self.logger.error("写入 \(name, privacy: .public) 失败: \(error)")
         }
     }
 }

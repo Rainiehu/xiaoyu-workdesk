@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import WorkdeskCore
+import WorkdeskUI
 
 /// 沙漏屏：横跨所有分类的一条连续时间轴，按计划日铺开，今天锚在中间、上方是过去、
 /// 下方是未来，打开时就滚到今天。分组由 `Store.timeline(today:)` 给出，这里不自己聚合。
@@ -99,17 +100,9 @@ struct HourglassScreen: View {
         return abs(old - new) > 0.5
     }
 
-    /// 轴两头按需垫的空白，与 Mac 的 `endInsets` 同一套：今天哪一侧的内容不够半屏，
-    /// 就在那头垫上差的那一截，够了的一侧一点不垫。
-    ///
-    /// 内容不满一屏时一点不垫，从顶排下来：那时一眼看得全，「今天在中线」换来的
-    /// 只是头顶一段没来由的空白。满了一屏才有滚动可言，锚定才值得垫。
+    /// 轴两头按需垫的空白。算术在共享层的 `TimelineLayout.endInsets`，两端同一套。
     private func endInsets(half: CGFloat) -> (top: CGFloat, bottom: CGFloat) {
-        guard let center = todayCenterY, let height = contentHeight else {
-            return (half, half)
-        }
-        guard height > half * 2 else { return (0, 0) }
-        return (max(0, half - center), max(0, half - (height - center)))
+        TimelineLayout.endInsets(half: half, todayCenterY: todayCenterY, contentHeight: contentHeight)
     }
 
     private func input(category: Category, today: Date) -> some View {
@@ -288,46 +281,5 @@ private struct TimelineEyeToggle: View {
     }
 }
 
-/// 眼睑的轮廓：`openness` 从 1（睁）到 0（闭）连续可变。睁着是杏仁形的上下睑，
-/// 闭上时两条睑合到同一道下弯的弧上 —— 弧朝下，闭着的眼才不会被读成一条抿直的嘴。
-private struct EyeLids: Shape {
-    var openness: CGFloat
-
-    var animatableData: CGFloat {
-        get { openness }
-        set { openness = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        let left = CGPoint(x: rect.minX + 0.09 * rect.width, y: rect.minY + 0.47 * rect.height)
-        let right = CGPoint(x: rect.maxX - 0.09 * rect.width, y: left.y)
-        // 二次曲线的控制点：睁着时上睑弓到顶、下睑坠到底（都越出格子，弓出来的
-        // 顶点才落在格内），闭上时两条一起落到同一个点 —— 那道下弯的弧。
-        let closed = rect.minY + 0.66 * rect.height
-        let top = closed + (rect.minY - 0.03 * rect.height - closed) * openness
-        let bottom = closed + (rect.minY + 1.03 * rect.height - closed) * openness
-        var path = Path()
-        path.move(to: left)
-        path.addQuadCurve(to: right, control: CGPoint(x: rect.midX, y: top))
-        path.addQuadCurve(to: left, control: CGPoint(x: rect.midX, y: bottom))
-        return path
-    }
-}
-
-/// 闭眼时那三根睫毛。只在闭合时露面，露不露由外面的透明度管，形状本身不变。
-private struct EyeLashes: Shape {
-    func path(in rect: CGRect) -> Path {
-        let lashes: [(CGPoint, CGPoint)] = [
-            (CGPoint(x: 0.26, y: 0.59), CGPoint(x: 0.20, y: 0.71)),
-            (CGPoint(x: 0.50, y: 0.63), CGPoint(x: 0.50, y: 0.76)),
-            (CGPoint(x: 0.74, y: 0.59), CGPoint(x: 0.80, y: 0.71)),
-        ]
-        var path = Path()
-        for (from, to) in lashes {
-            path.move(to: CGPoint(x: rect.minX + from.x * rect.width, y: rect.minY + from.y * rect.height))
-            path.addLine(to: CGPoint(x: rect.minX + to.x * rect.width, y: rect.minY + to.y * rect.height))
-        }
-        return path
-    }
-}
+// 眼睑与睫毛的形状（`EyeLids`/`EyeLashes`）在共享层的 `EyeShapes.swift`，两端同一双眼。
 #endif

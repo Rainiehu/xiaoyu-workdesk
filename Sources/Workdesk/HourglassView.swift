@@ -1,5 +1,6 @@
 import SwiftUI
 import WorkdeskCore
+import WorkdeskUI
 
 /// 沙漏视图：横跨所有分类的一条连续时间轴。排了计划日的待办按计划日铺成这条轴，
 /// 今天锚在中间、上方是过去、下方是未来，打开时就滚到今天。
@@ -12,10 +13,8 @@ import WorkdeskCore
 /// 顶上是记事输入区：这里是打开主线默认落地的地方，也是最常问「接下来要做什么」的地方，
 /// 所以它必须能直接记录，不该逼使用者先切到某个分类。在这儿记下的待办自动排在今天，
 /// 于是它立刻出现在眼前这条轴上，而不是凭空消失到某个分类里去。
-/// 两边的行都能就地打勾、就地删除 —— 这是最常问「今天要做什么」的一屏，不该为了打个勾先切到某个分类去。
-/// 改写正文与移到分类不在这儿，那两件事仍旧只在分类视图里。
+/// 两边的行与别处的行同权：打勾、删除、排期、就地改写、移到分类、拖拽都在（ADR-0003）。
 /// 轴上的条目可以直接拖到别的日期分组里去改期：调整安排是一个手势，不必点开日期面板。
-/// 拖拽只发生在这条轴的日期分组之间，也只改计划日 —— 归属哪个分类是横轴上的事，不因这一拖而变。
 ///
 /// 计划日在过去而未完成的待办就是「过期」：留在它那一天，不置顶、不自动顺延、不催办，
 /// 唯一的痕迹是那一行的勾圈描成琥珀 —— 安静的记号，不是警报。见 ADR-0004（修订了 ADR-0001）。
@@ -132,19 +131,9 @@ struct HourglassView: View {
         }
     }
 
-    /// 轴两头按需垫的空白：今天哪一侧的内容不够半屏，就在那头垫上差的那一截，
-    /// 够了的一侧一点不垫 —— `scrollTo(anchor: .center)` 只在目标两边都还有内容可滚时
-    /// 才居得了中，这两段垫的就是「可滚」的下限。还没量出今天在哪之前先按半屏垫着
-    /// （等于从前的行为），量到了再收 —— 所以这里的空白只会少、不会多。
-    ///
-    /// 内容不满一屏时一点不垫，从顶排下来：那时一眼看得全，「今天在中线」换来的
-    /// 只是头顶一段没来由的空白。满了一屏才有滚动可言，锚定才值得垫。
+    /// 轴两头按需垫的空白。算术在共享层的 `TimelineLayout.endInsets`，两端同一套。
     private func endInsets(half: CGFloat) -> (top: CGFloat, bottom: CGFloat) {
-        guard let center = todayCenterY, let height = contentHeight else {
-            return (half, half)
-        }
-        guard height > half * 2 else { return (0, 0) }
-        return (max(0, half - center), max(0, half - (height - center)))
+        TimelineLayout.endInsets(half: half, todayCenterY: todayCenterY, contentHeight: contentHeight)
     }
 
     /// 记事的那一条：输入框，旁边是记到哪个分类。
@@ -438,45 +427,4 @@ private struct TimelineEyeToggle: View {
     }
 }
 
-/// 眼睑的轮廓：`openness` 从 1（睁）到 0（闭）连续可变。睁着是杏仁形的上下睑，
-/// 闭上时两条睑合到同一道下弯的弧上 —— 弧朝下，闭着的眼才不会被读成一条抿直的嘴。
-private struct EyeLids: Shape {
-    var openness: CGFloat
-
-    var animatableData: CGFloat {
-        get { openness }
-        set { openness = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        let left = CGPoint(x: rect.minX + 0.09 * rect.width, y: rect.minY + 0.47 * rect.height)
-        let right = CGPoint(x: rect.maxX - 0.09 * rect.width, y: left.y)
-        // 二次曲线的控制点：睁着时上睑弓到顶、下睑坠到底（都越出格子，弓出来的
-        // 顶点才落在格内），闭上时两条一起落到同一个点 —— 那道下弯的弧。
-        let closed = rect.minY + 0.66 * rect.height
-        let top = closed + (rect.minY - 0.03 * rect.height - closed) * openness
-        let bottom = closed + (rect.minY + 1.03 * rect.height - closed) * openness
-        var path = Path()
-        path.move(to: left)
-        path.addQuadCurve(to: right, control: CGPoint(x: rect.midX, y: top))
-        path.addQuadCurve(to: left, control: CGPoint(x: rect.midX, y: bottom))
-        return path
-    }
-}
-
-/// 闭眼时那三根睫毛。只在闭合时露面，露不露由外面的透明度管，形状本身不变。
-private struct EyeLashes: Shape {
-    func path(in rect: CGRect) -> Path {
-        let lashes: [(CGPoint, CGPoint)] = [
-            (CGPoint(x: 0.26, y: 0.59), CGPoint(x: 0.20, y: 0.71)),
-            (CGPoint(x: 0.50, y: 0.63), CGPoint(x: 0.50, y: 0.76)),
-            (CGPoint(x: 0.74, y: 0.59), CGPoint(x: 0.80, y: 0.71)),
-        ]
-        var path = Path()
-        for (from, to) in lashes {
-            path.move(to: CGPoint(x: rect.minX + from.x * rect.width, y: rect.minY + from.y * rect.height))
-            path.addLine(to: CGPoint(x: rect.minX + to.x * rect.width, y: rect.minY + to.y * rect.height))
-        }
-        return path
-    }
-}
+// 眼睑与睫毛的形状（`EyeLids`/`EyeLashes`）在共享层的 `EyeShapes.swift`，两端同一双眼。

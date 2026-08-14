@@ -1,5 +1,6 @@
 import SwiftUI
 import WorkdeskCore
+import WorkdeskUI
 
 /// 三处待办行共用的那几样东西：度量、打勾的圈、悬停浮出的删除、拖起来时手上跟着的那一小块。
 ///
@@ -317,26 +318,55 @@ struct TodoText: View {
     }
 }
 
-/// 「移到分类」：列出别的分类，选一个这条待办就归到那儿去。
-/// 移走只改归属 —— 计划日、创建日、完成日与完成状态都不变，这条由 `Store` 保证。
-/// 它同时是腾空一个分类的那条路：非空分类删不掉，没有它就永远删不掉。
-struct TodoMoveMenu: View {
-    @Environment(Store.self) private var store
-    let todo: TodoItem
+// 「移到分类」菜单（`TodoMoveMenu`）在共享层，两端逐字同款、只此一份。
 
-    var body: some View {
-        let others = store.categories(besides: todo.categoryID)
-        if others.isEmpty {
-            // 只有这一个分类时无处可移。菜单项照样在，只是灰着 —— 免得右键之后空空如也。
-            Button("移到分类") {}
-                .disabled(true)
-        } else {
-            Menu("移到分类") {
-                ForEach(others) { category in
-                    Button(category.name) { store.moveTodo(todo, to: category.id) }
+extension TodoText {
+    /// 树编辑三下键（Tab 缩进、Shift+Tab 升一级、回车再开一行）都接上的那副，
+    /// 挪完、生完把光标接力交给 `TreeComposer`。分类视图左列与子树两处同一份 ——
+    /// 行的共性收在这儿，不各抄一遍。轴上不用这副：兄弟看不见的地方，
+    /// Tab 留给系统走焦点，见 `onIndent` 的注释。
+    init(todo: TodoItem, editing: Binding<TodoEditing>, tree store: Store, composer: TreeComposer) {
+        self.init(
+            todo: todo, editing: editing,
+            onIndent: { if store.indentTodo(todo.id) { composer.resumeEditingID = todo.id } },
+            onOutdent: { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } },
+            onReturn: {
+                if let newID = store.addTodo("", after: todo.id) {
+                    composer.resumeEditingID = newID
                 }
             }
-        }
+        )
+    }
+}
+
+/// 接上光标的接力：`TreeComposer.resumeEditingID` 说好要续上改写的那一行，
+/// 出现时（Tab/Shift+Tab 挪完刚上屏，`onAppear`）或变化时（删行退光标，
+/// 行早就在屏上，`onAppear` 不会再响）就地开编。两处列表同一份。
+private struct ResumesTreeEditing: ViewModifier {
+    @Environment(TreeComposer.self) private var composer
+    let todo: TodoItem
+    @Binding var editing: TodoEditing
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                if composer.resumeEditingID == todo.id {
+                    composer.resumeEditingID = nil
+                    editing.begin(todo)
+                }
+            }
+            .onChange(of: composer.resumeEditingID) { _, id in
+                if id == todo.id {
+                    composer.resumeEditingID = nil
+                    editing.begin(todo)
+                }
+            }
+    }
+}
+
+extension View {
+    func resumesTreeEditing(_ todo: TodoItem, editing: Binding<TodoEditing>) -> some View {
+        modifier(ResumesTreeEditing(todo: todo, editing: editing))
     }
 }
 

@@ -14,7 +14,8 @@ struct UnscheduledColumn: View {
     @Environment(Store.self) private var store
 
     /// 这一列的宽度。定死一个值而不是按比例分 —— 轴于是随窗口一起长，
-    /// 「哪边是主角」不随窗口宽度动摇。与分类视图右列同一个数：两处的右列看着是同一块东西。
+    /// 「哪边是主角」不随窗口宽度动摇。分类视图右列引用的就是这一个数：
+    /// 两处的右列看着是同一块东西。
     static let width: CGFloat = 264
 
     var body: some View {
@@ -142,6 +143,7 @@ private struct UnscheduledRow: View {
             TodoDragPreview(text: todo.text, tint: tint)
         }
         // 落间换位、落身入怀：组内的顺序与分类视图左列是同一份，缝也照样接。
+        // 跨分类组的缝 `Store` 不接（弹回去）—— 换分类是拖到 tab 上的事，一次只动一样。
         .todoTreeDropTarget(todo, allowsGaps: true)
     }
 

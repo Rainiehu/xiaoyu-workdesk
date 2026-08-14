@@ -127,14 +127,9 @@ private struct PlannedDayPanel: View {
         return Calendar.current.date(byAdding: .day, value: offset, to: start) ?? start
     }
 
-    /// 排到这一天；已经排在这一天的，这一下就是取消。
-    /// 「是不是同一天」用 `Calendar` 比 —— 底下存着时刻，`==` 会把同一天认成两天。
+    /// 排到这一天；已排这一天就是取消 —— 那条规矩在 `Store.togglePlannedDay`，两端同一份。
     private func schedule(_ day: Date) {
-        if let planned = todo.plannedOn, Calendar.current.isDate(planned, inSameDayAs: day) {
-            store.clearPlannedDay(todo)
-        } else {
-            store.setPlannedDay(day, for: todo)
-        }
+        store.togglePlannedDay(todo, to: day)
         dismiss()
     }
 }

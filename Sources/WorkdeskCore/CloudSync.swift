@@ -109,7 +109,9 @@ public final class CloudSync: CKSyncEngineDelegate {
         active = true
 
         let saved = loadSavedState()
-        engineState = saved?.stateSerialization
+        // 本地有文件读坏扔掉的：增量 token 说的是一个不完整的库，作废 ——
+        // 引擎当头一次跑，全量重抓云端，丢的记录从云上回来。
+        engineState = store.hadCorruptFilesOnLoad ? nil : saved?.stateSerialization
         lastSuccessAt = saved?.lastSuccessAt ?? .now
         systemFields = saved?.systemFields ?? [:]
         startEngine()
@@ -208,8 +210,10 @@ public final class CloudSync: CKSyncEngineDelegate {
             } else if let favorite = store.favorite(recordName: name) {
                 records[recordID] = favorite.makeRecord(onto: base)
             } else {
-                // 本地已经没有这条了（多半是没发出去就被删了）—— 这次保存没有要说的事。
+                // 本地已经没有这条了（活人和池子里都查过）—— 这次保存没有要说的事。
+                // 账本也一并结清：记录都不在了，这笔账再挂着只会让云朵永远转圈。
                 syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
+                store.settleSyncSave(recordName: name)
             }
         }
         let prepared = records
@@ -379,8 +383,10 @@ public final class CloudSync: CKSyncEngineDelegate {
                     )
                 }
             case SyncSchema.favoriteType:
-                if let item = FavoriteItem(record: server) { store.applyRemoteFavorite(item) }
+                // 先销账再落地：`applyRemoteFavorite` 见到挂账会以本地为准而不收，
+                // 账不先结清，云端那份永远落不下来，本地那份也不会再重发。
                 store.settleSyncSave(recordName: name)
+                if let item = FavoriteItem(record: server) { store.applyRemoteFavorite(item) }
             default:
                 break
             }

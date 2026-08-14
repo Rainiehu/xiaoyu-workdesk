@@ -2,6 +2,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import WorkdeskCore
+import WorkdeskUI
 
 /// 三处待办行共用的那几样东西，iOS 版。结构与 Mac 完全同一副：
 ///
@@ -169,6 +170,19 @@ extension View {
 /// 这个 app（类型是自家的），id 犯不着序列化一个来回，放在这儿落点同步取用。
 enum TodoDrag {
     static var current: TodoItem.ID?
+    /// 第几场拖拽。「结束了」的信号（见 `DragEndListener`）可能迟到 ——
+    /// 带上场次，认不上号的迟到信号作废，不会错撤下一场的账。
+    static var session = 0
+}
+
+/// 拖拽会话的「结束了」信号。系统框架没有「取消了」的回调，只有这条路：
+/// 会话一散（落定或取消），系统放掉 NSItemProvider，取件闭包攥着的这枚令牌
+/// 跟着死，`deinit` 就是那一声。落定的拖拽在 `performDrop` 里已摘掉
+/// `TodoDrag.current`，于是收到这一声时还挂着的，就是取消。
+private final class DragEndListener {
+    let onEnd: () -> Void
+    init(onEnd: @escaping () -> Void) { self.onEnd = onEnd }
+    deinit { onEnd() }
 }
 
 /// 触感的那几记，共用一套常驻的发生器，打之前有预热 —— 现用现建的发生器
@@ -211,29 +225,54 @@ private struct TodoDropDelegate: DropDelegate {
     }
 }
 
-extension View {
-    /// 抓起一条待办。不走 `.draggable` 是为了让落点能把提案改成 `.move` ——
-    /// 语义对了，系统也不会挂「复制」的绿加号。预览是一粒看不见的点：
-    /// 列表实时换位就是预览，手上不用再浮一小块内容。
-    /// 拎起那一刻直接打一记中震 —— 「抓住了」不用看也知道。
-    func todoDragSource(_ todo: TodoItem) -> some View {
+/// 抓起一条待办的那一头。挂着 `Store` 是为了拖起时记基线、取消时退账 ——
+/// 悬停一路是当场落账的（列表即预览），取消的路必须有得退。
+private struct TodoDragSourceModifier: ViewModifier {
+    @Environment(Store.self) private var store
+    let todo: TodoItem
+
+    func body(content: Content) -> some View {
         // 拎起那一记震动欠着不打：系统拖拽框架里没有「抬起了」的可靠信号 ——
         // 取件闭包会被预取复用、首次 enter 晚七成秒、并行长按会踩坏拖拽识别，
         // 三条路都实测过不通。等自绘拖拽那一轮，抬起归自己管了再补。
-        onDrag {
+        content.onDrag {
+            TodoDrag.session += 1
+            let session = TodoDrag.session
             TodoDrag.current = todo.id
+            store.beginTodoDrag(todo.id)
             Buzz.warm()
+            let store = self.store
+            let id = todo.id
+            let listener = DragEndListener {
+                Task { @MainActor in
+                    // 还挂着 current 的结束就是取消 —— 落定的在 performDrop 里摘过了。
+                    guard session == TodoDrag.session, TodoDrag.current == id else { return }
+                    TodoDrag.current = nil
+                    withAnimation(.spring(duration: 0.2)) { store.cancelTodoDrag(id) }
+                }
+            }
             let provider = NSItemProvider()
             provider.registerDataRepresentation(
                 forTypeIdentifier: UTType.workdeskTodo.identifier, visibility: .ownProcess
             ) { completion in
-                completion(try? JSONEncoder().encode(DraggedTodo(id: todo.id)), nil)
+                // 令牌与 provider 同生共死 —— 它的 `deinit` 就是「会话结束」那一声。
+                _ = listener
+                completion(try? JSONEncoder().encode(DraggedTodo(id: id)), nil)
                 return nil
             }
             return provider
         } preview: {
             Color.clear.frame(width: 1, height: 1)
         }
+    }
+}
+
+extension View {
+    /// 抓起一条待办。不走 `.draggable` 是为了让落点能把提案改成 `.move` ——
+    /// 语义对了，系统也不会挂「复制」的绿加号。预览是一粒看不见的点：
+    /// 列表实时换位就是预览，手上不用再浮一小块内容。
+    func todoDragSource(_ todo: TodoItem) -> some View {
+        modifier(TodoDragSourceModifier(todo: todo))
     }
 
     /// 接住一条待办。悬进来那一刻发生什么由 `entered` 定、落下收尾由 `perform` 定 ——
@@ -298,25 +337,7 @@ struct TodoText: View {
     }
 }
 
-/// 「移到分类」：列出别的分类，选一个这条待办就归到那儿去。与 Mac 同一副。
-struct TodoMoveMenu: View {
-    @Environment(Store.self) private var store
-    let todo: TodoItem
-
-    var body: some View {
-        let others = store.categories(besides: todo.categoryID)
-        if others.isEmpty {
-            Button("移到分类") {}
-                .disabled(true)
-        } else {
-            Menu("移到分类") {
-                ForEach(others) { category in
-                    Button(category.name) { store.moveTodo(todo, to: category.id) }
-                }
-            }
-        }
-    }
-}
+// 「移到分类」菜单（`TodoMoveMenu`）在共享层，两端逐字同款、只此一份。
 
 /// 行上长按菜单的总开关。先关着：长按干干净净全归拖拽的抬起 ——
 /// 菜单（只剩「移到分类」）等磨玻璃自绘那一轮回来，开关一拨即回，代码不删。
