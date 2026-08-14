@@ -10,8 +10,10 @@ struct UsageCard: View {
     /// 每分钟自己重扫一次。窗口以小时计，这个频率足够，也不至于让界面上的数字像秒表。
     @State private var ticker = Date.now
 
-    /// 刷新图标转到的角度。只增不减、永远停在整圈上 —— 箭头不会歪着趴在卡片上。
+    /// 刷新图标转到的角度。只增不减、每次只加整圈 —— 箭头停下来永远是正位。
     @State private var spinAngle = 0.0
+    /// 圈的接力棒正在手上：completion 链跑着的时候不再另起一条，免得两条链叠着转出双倍速。
+    @State private var spinning = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -43,6 +45,19 @@ struct UsageCard: View {
         }
     }
 
+    /// 转一整圈，转完还在扫就接着转。有限的圈首尾相接，而不是 repeatForever ——
+    /// 那种动画是顶不掉的（后起的曲线动画跟它并行叠加，不替换），一旦请上就请不走了。
+    /// 一圈起步也正好解决「快扫描一眨眼就完」：真正的停点永远落在整圈末尾，
+    /// 再快的一次刷新也看得见一次完整旋转。
+    private func spinTurn() {
+        spinning = true
+        withAnimation(.linear(duration: 0.8)) {
+            spinAngle += 360
+        } completion: {
+            if store.usageLoading { spinTurn() } else { spinning = false }
+        }
+    }
+
     private var header: some View {
         HStack {
             Text("AI 用量 · 今日")
@@ -66,16 +81,9 @@ struct UsageCard: View {
             .help("立刻重新扫描并查限流")
             // 扫着、问着的那一会儿图标转圈 —— 点了按钮界面却纹丝不动，看着就像坏的。
             // 每分钟的例行重扫转的也是这同一个圈：图标只说一件事，「这一刻正在干活」。
-            .onChange(of: store.usageLoading) { _, loading in
-                if loading {
-                    withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
-                        spinAngle += 360
-                    }
-                } else {
-                    // 快扫描一眨眼就完，转不满一圈就停会看不出动过 ——
-                    // 收尾补上完整一圈，顺带把 repeatForever 顶掉。
-                    withAnimation(.linear(duration: 0.4)) { spinAngle += 360 }
-                }
+            // initial 也接：卡片重建时若刷新正在飞，圈从露面那一刻就该转着。
+            .onChange(of: store.usageLoading, initial: true) { _, loading in
+                if loading && !spinning { spinTurn() }
             }
         }
     }
