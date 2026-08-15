@@ -104,6 +104,7 @@ struct CategoryScreen: View {
 private struct CategoryRow: View {
     @Environment(Store.self) private var store
     @Environment(TodayClock.self) private var clock
+    @Environment(TreeComposer.self) private var composer
     let todo: TodoItem
     let tint: Color
 
@@ -115,7 +116,7 @@ private struct CategoryRow: View {
                 store.toggleTodo(todo)
             }
 
-            TodoText(todo: todo, editing: $editing)
+            TodoText(todo: todo, editing: $editing, tree: store, composer: composer)
 
             Spacer(minLength: 8)
 
@@ -139,6 +140,8 @@ private struct CategoryRow: View {
             Buzz.notify.notificationOccurred(.success)
             return true
         })
+        // 光标的接力（回车新生）收在 `resumesTreeEditing` 一处。
+        .resumesTreeEditing(todo, editing: $editing)
         .swipeToDelete(deleteTodo)
     }
 

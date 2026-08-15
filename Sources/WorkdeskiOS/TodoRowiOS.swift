@@ -311,6 +311,10 @@ struct TodoText: View {
     @Environment(Store.self) private var store
     let todo: TodoItem
     @Binding var editing: TodoEditing
+    /// 改写中回车收下这次改写之后再做什么 ——「再开一行同级」挂在这儿。
+    /// 与 Mac 同一条边界：只在同级顺序看得见的地方接（分类屏主列、树里），
+    /// 不传就是回车只收改写。
+    var onReturn: (() -> Void)? = nil
 
     @FocusState private var focused: Bool
 
@@ -319,21 +323,59 @@ struct TodoText: View {
             TextField("", text: $editing.draft)
                 .textFieldStyle(.plain)
                 .focused($focused)
-                .onSubmit(commit)
-                .submitLabel(.done)
+                // 回车收下这次改写，写了字就接着「再开一行」；空着回车就是写完了，
+                // 只收改写不开新行 —— 与「空行悄悄收走」是同一句话的两半。
+                .onSubmit {
+                    let wrote = !editing.draft
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    commit()
+                    if wrote { onReturn?() }
+                }
+                .submitLabel(onReturn == nil ? .done : .return)
                 .onChange(of: focused) { _, focused in if !focused { commit() } }
-                .onAppear { focused = true }
+                // 焦点让一拍再落：回车生出新行时，这个输入框出现的同一拍里，
+                // 上一行的输入框才刚交还第一响应者 —— 同拍去抢会被那次交还冲掉，
+                // 光标就得等人再点一下。与 Mac 同一个坑、同一副让法。
+                .onAppear {
+                    Task { @MainActor in
+                        await Task.yield()
+                        focused = true
+                    }
+                }
         } else {
             Text(todo.text)
                 .multilineTextAlignment(.leading)
         }
     }
 
-    /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路。
+    /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路；
+    /// 生下来就空、又一个字没写的行是例外：悄悄收走，见 `discardEmptyTodo`。
     private func commit() {
         guard editing.active else { return }
         editing.end()
+        if todo.text.isEmpty,
+           editing.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            store.discardEmptyTodo(todo.id)
+            return
+        }
         store.editTodo(todo, to: editing.draft)
+    }
+}
+
+extension TodoText {
+    /// 树编辑那一记回车（再开一行）接上的那副，生完把光标接力交给 `TreeComposer`。
+    /// 分类屏主列与子树两处同一份 —— 行的共性收在这儿，不各抄一遍。
+    /// Mac 的 Tab/Shift+Tab 在这儿没有对应键，也没有别的路：改层级（入怀、升降级）
+    /// iOS 这一版整个欠着，见 `SubTodoTree.swift` 头上的账。
+    init(todo: TodoItem, editing: Binding<TodoEditing>, tree store: Store, composer: TreeComposer) {
+        self.init(
+            todo: todo, editing: editing,
+            onReturn: {
+                if let newID = store.addTodo("", after: todo.id) {
+                    composer.resumeEditingID = newID
+                }
+            }
+        )
     }
 }
 
