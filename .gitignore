@@ -20,6 +20,11 @@ Resources/provisioning/Provisioning.xcodeproj/project.xcworkspace/
 Resources/provisioning/Provisioning.xcodeproj/xcuserdata/
 .claude/worktrees/
 
+# agent 的 skill 库：.agents/ 是真身，.claude/skills 是给 Claude Code 的入口软链。
+# 与 app 本身无关，各人机器上自己装；装了哪些、锁在哪个版本仍记在 skills-lock.json 里
+.agents/
+.claude/skills
+
 # 编辑器与 Xcode 的机器本地状态
 .vscode/
 ios/Workdesk.xcodeproj/xcuserdata/
