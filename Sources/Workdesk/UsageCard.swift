@@ -45,16 +45,36 @@ struct UsageCard: View {
         }
     }
 
+    /// 圈与圈之间最多接这么多棒。75 圈 × 0.8 秒 ≈ 一分钟，比任何一次正常扫描都长得多 ——
+    /// 见 `spinTurn` 里那根保险丝。
+    private static let maxSpinTurns = 75
+
     /// 转一整圈，转完还在扫就接着转。有限的圈首尾相接，而不是 repeatForever ——
     /// 那种动画是顶不掉的（后起的曲线动画跟它并行叠加，不替换），一旦请上就请不走了。
     /// 一圈起步也正好解决「快扫描一眨眼就完」：真正的停点永远落在整圈末尾，
     /// 再快的一次刷新也看得见一次完整旋转。
-    private func spinTurn() {
+    ///
+    /// 接力**必须绕主队列走一趟**，不能在 completion 里直接递归。「还在不在扫」这个判据，
+    /// 是扫描线程排到主线程才翻转的（`Store.refreshUsage` 末尾那段 `MainActor.run`）。
+    /// 直接递归时，一圈接一圈都在动画自己的 flush 里背靠背连播，那段翻转永远排不上队 ——
+    /// 判据于是永远为真，圈无限接下去，主线程被每秒几百次全树重算钉死，越忙越翻不了身：
+    /// 它把自己的解药饿死了。绕一趟主队列，翻转就排在这一棒前面，链子自然断得掉。
+    ///
+    /// 再加一根保险丝：连转 `maxSpinTurns` 圈就强制歇手。哪天再冒出别的「旗子翻不过来」的
+    /// 路径，代价也只是白转一分钟，而不是把整个 app 焊死。歇手之后由
+    /// `onChange(of: usageLoading)` 在下一次扫描时重新点火。
+    private func spinTurn(turn: Int = 0) {
         spinning = true
         withAnimation(.linear(duration: 0.8)) {
             spinAngle += 360
         } completion: {
-            if store.usageLoading { spinTurn() } else { spinning = false }
+            guard turn < Self.maxSpinTurns else {
+                spinning = false
+                return
+            }
+            Task { @MainActor in
+                if store.usageLoading { spinTurn(turn: turn + 1) } else { spinning = false }
+            }
         }
     }
 
