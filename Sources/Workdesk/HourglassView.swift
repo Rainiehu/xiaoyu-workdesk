@@ -347,6 +347,10 @@ private struct TimelineRow: View {
         // 轴上的行不接缝：这条轴的顺序不由人排，行身只有「入怀」一件事 ——
         // 改期落在组的任何别处（组头、行距、留白），照旧由整组接住。
         .todoTreeDropTarget(todo, allowsGaps: false, tint: tint)
+        // 光标的接力。轴上自己不发接力（顶层行没有 Tab 那三下），但接得住 ——
+        // 树里 Shift+Tab 升上来的行会落到这儿，光标得跟着来。不接的话，
+        // 一条还没写字就升上来的行会被撂在这儿：不在改写态，也没人收走它。
+        .resumesTreeEditing(todo, editing: $editing)
     }
 }
 

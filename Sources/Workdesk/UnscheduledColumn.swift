@@ -145,6 +145,10 @@ private struct UnscheduledRow: View {
         // 落间换位、落身入怀：组内的顺序与分类视图左列是同一份，缝也照样接。
         // 跨分类组的缝 `Store` 不接（弹回去）—— 换分类是拖到 tab 上的事，一次只动一样。
         .todoTreeDropTarget(todo, allowsGaps: true, tint: tint)
+        // 光标的接力。这一列自己不发接力（顶层行没有 Tab 那三下），但接得住 ——
+        // 树里 Shift+Tab 升上来的行会落到这儿，光标得跟着来。不接的话，
+        // 一条还没写字就升上来的行会被撂在这儿：不在改写态，也没人收走它。
+        .resumesTreeEditing(todo, editing: $editing)
     }
 
     /// 打勾：圈先亮起来，过一拍这条才真的记成完成、跟着淡出这一列。

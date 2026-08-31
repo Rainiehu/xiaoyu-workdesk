@@ -194,6 +194,29 @@ struct SubTodoTests {
         }
     }
 
+    /// 缩进这条路不问正文 —— 一个字没写的新行照挪不误。
+    ///
+    /// 钉的是 `Store` 这一半：视图层的 Tab 指着它，靠的就是「空行也缩得进去」。
+    /// 另一半（视图层不许在挪之前把空行收走）在 `TodoText` 里，这儿够不着 ——
+    /// 测试只覆盖 `WorkdeskCore`。真出过的那个 bug 是视图层那一半。
+    @Test("一个字没写的新行也缩得进去：缩进不问正文")
+    func aBlankNewRowStillIndents() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            store.addTodo("装机", in: work.id)
+            let parent = try #require(store.todos.first)
+            store.addSubTodo("一", under: parent.id)
+            let first = try #require(store.children(of: parent.id).first)
+            let blank = try #require(store.addTodo("", after: first.id))
+
+            #expect(store.indentTodo(blank))
+            #expect(store.children(of: first.id).map(\.id) == [blank])
+            // 挪完还在，正文照旧空着 —— 字是挪完再写的。
+            #expect(store.todos.first { $0.id == blank }?.text == "")
+        }
+    }
+
     @Test("Shift+Tab 升一级，站到父的旁边、紧跟在父后面")
     func shiftTabPromotesNextToTheParent() throws {
         try withTemporaryDirectory { dir in

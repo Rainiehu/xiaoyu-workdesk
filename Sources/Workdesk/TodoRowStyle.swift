@@ -170,10 +170,13 @@ struct TodoText: View {
     let todo: TodoItem
     @Binding var editing: TodoEditing
     /// 改写中按下 Tab / Shift+Tab 时做什么 —— 缩进（挂到上一个兄弟下面）与升一级。
+    /// 挪成了返回 `true`；挪不动返回 `false`（没有上一个兄弟、已在顶层，
+    /// 以及 `Store` 拒绝的那些：成环、目标已删、跨分类），那时这一行原地不动、
+    /// 改写照旧开着 —— 键还是吃掉，不放它去走焦点，手不该在改写中间被甩走。
     /// 只在兄弟看得见的地方接（分类视图左列、树里）：轴上挂到一个看不见的邻居名下，
     /// 那一行就凭空消失了，所以那两处不传，Tab 留给系统走焦点。
-    var onIndent: (() -> Void)?
-    var onOutdent: (() -> Void)?
+    var onIndent: (() -> Bool)?
+    var onOutdent: (() -> Bool)?
     /// 改写中回车收下这次改写之后再做什么 —— 「再开一行同级」挂在这儿。
     /// 与 Tab 同一条边界：只在同级顺序看得见的地方接，不传就是回车只收改写。
     var onReturn: (() -> Void)?
@@ -255,8 +258,8 @@ struct TodoText: View {
                         editing.end()
                         // 收走这一行之后，光标退回上一行的末尾接着改 —— 键盘流里
                         // 删行不该把手甩在半空。只在回车开得出新行的地方接
-                        // （与 onReturn 同一条边界）：别处没人消费这份接力，
-                        // 记下的 id 会在行视图重建时冷不丁把那行拽进改写。
+                        // （与 onReturn 同一条边界）：轴上和右列的兄弟顺序不由人排，
+                        // 「上一行」在那儿说不清是谁，退回去也就无从谈起。
                         let previous = onReturn != nil ? store.todoBefore(todo.id) : nil
                         if todo.text.isEmpty {
                             store.discardEmptyTodo(todo.id)
@@ -270,8 +273,16 @@ struct TodoText: View {
                     guard press.key == .tab || backtab else { return .ignored }
                     let move = (backtab || press.modifiers.contains(.shift)) ? onOutdent : onIndent
                     guard let move else { return .ignored }
-                    commit()
-                    move()
+                    // 挪位置不丢字：改到一半的字先落盘。但这儿不走 `commit` ——
+                    // 它会把一个字没写的新行当空行收走，要挪的那一行于是先没了，
+                    // 人眼里就是「新记一行、还没打字，一按 Tab 待办凭空消失」。
+                    // Tab 是给这一行换个位置，不是写完了走人。
+                    // 空白照旧不写进正文，由 `editTodo` 挡着。
+                    store.editTodo(todo, to: editing.draft)
+                    // 挪成了，这个输入框随即被重建，光标由 `TreeComposer.resumeEditingID`
+                    // 接到新位置上；挪不动就留在原地接着改 —— 挪不成的那一下
+                    // 不该顺手结束一场改写，更不该留下一行空白没人管。
+                    if move() { editing.end() }
                     return .handled
                 }
         } else {
@@ -306,6 +317,9 @@ struct TodoText: View {
 
     /// 收下这次改写。空白正文由 `Store` 挡掉，那时原文留着 —— 删除是另一条路；
     /// 生下来就空、又一个字没写的行是例外：悄悄收走，见 `discardEmptyTodo`。
+    ///
+    /// 「改完了」才走这儿。挪位置（Tab/Shift+Tab）不走 —— 换个地方待着不是写完了，
+    /// 那条路只落字、不收行，见 `onKeyPress`。
     private func commit() {
         guard editing.active else { return }
         editing.end()
@@ -328,8 +342,16 @@ extension TodoText {
     init(todo: TodoItem, editing: Binding<TodoEditing>, tree store: Store, composer: TreeComposer) {
         self.init(
             todo: todo, editing: editing,
-            onIndent: { if store.indentTodo(todo.id) { composer.resumeEditingID = todo.id } },
-            onOutdent: { if store.promoteTodo(todo.id) { composer.resumeEditingID = todo.id } },
+            onIndent: {
+                let moved = store.indentTodo(todo.id)
+                if moved { composer.resumeEditingID = todo.id }
+                return moved
+            },
+            onOutdent: {
+                let moved = store.promoteTodo(todo.id)
+                if moved { composer.resumeEditingID = todo.id }
+                return moved
+            },
             onReturn: {
                 if let newID = store.addTodo("", after: todo.id) {
                     composer.resumeEditingID = newID
@@ -341,7 +363,12 @@ extension TodoText {
 
 /// 接上光标的接力：`TreeComposer.resumeEditingID` 说好要续上改写的那一行，
 /// 出现时（Tab/Shift+Tab 挪完刚上屏，`onAppear`）或变化时（删行退光标，
-/// 行早就在屏上，`onAppear` 不会再响）就地开编。两处列表同一份。
+/// 行早就在屏上，`onAppear` 不会再响）就地开编。
+///
+/// 发接力的只有树编辑那几下（分类视图左列、树里），但**四处的行都接**：
+/// Shift+Tab 升一级会把行送去别的屏（树 → 未排期列、树 → 轴），
+/// 光标得跟着行走，不看它落在哪一屏。少接一处，一条还没写字就升上去的行
+/// 就会被撂在那儿 —— 不在改写态，也没人收走它。
 private struct ResumesTreeEditing: ViewModifier {
     @Environment(TreeComposer.self) private var composer
     let todo: TodoItem
