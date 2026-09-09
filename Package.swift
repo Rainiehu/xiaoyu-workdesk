@@ -48,6 +48,12 @@ let package = Package(
             swiftSettings: swift5Mode
         ),
         .testTarget(
+            name: "WorkdeskViewTests",
+            dependencies: ["Workdesk", "WorkdeskCore"],
+            path: "Tests/WorkdeskViewTests",
+            swiftSettings: swift5Mode
+        ),
+        .testTarget(
             name: "WorkdeskTests",
             dependencies: ["WorkdeskCore"],
             path: "Tests/WorkdeskTests",

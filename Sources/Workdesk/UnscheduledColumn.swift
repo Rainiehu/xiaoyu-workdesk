@@ -49,7 +49,9 @@ struct UnscheduledColumn: View {
                 .allowsHitTesting(false)
         } else {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // 分类组里摊着整棵子树，滚动时不要反复装卸这些高度不同的组。
+                // 与分类视图同样一次排好，避开 macOS 的惰性布局更新循环。
+                VStack(alignment: .leading, spacing: 14) {
                     ForEach(groups) { group in
                         UnscheduledCategoryGroup(group: group)
                     }
@@ -130,8 +132,8 @@ private struct UnscheduledRow: View {
             PlannedDayControl(todo: todo, rowHovering: hovering)
 
             // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
-            if hovering && !editing.active {
-                TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
+            TodoDeleteButton(visible: hovering && !editing.active) {
+                withAnimation { store.deleteTodo(todo) }
             }
         }
         .todoRowChrome(hovering: hovering)

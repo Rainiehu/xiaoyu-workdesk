@@ -21,14 +21,23 @@ struct PlannedDayControl: View {
     @State private var presented = false
 
     var body: some View {
-        if showsDate, !entryVisible, let planned = todo.plannedOn {
-            Text(planned.dayLabel(relativeTo: clock.today))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        if entryVisible {
+        // 日期与入口共用一格，宽度取两者较大值；隐藏的那一副仍参与测量，
+        // 悬停时正文因此不用重新换行，滚动位置也不会被行高变化推走。
+        ZStack(alignment: .trailing) {
+            if showsDate, let planned = todo.plannedOn {
+                Text(planned.dayLabel(relativeTo: clock.today))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .opacity(entryVisible ? 0 : 1)
+                    .accessibilityHidden(entryVisible)
+            }
             entry
+                .opacity(entryVisible ? 1 : 0)
+                .disabled(!entryVisible)
+                .allowsHitTesting(entryVisible)
+                .accessibilityHidden(!entryVisible)
         }
+        .fixedSize()
     }
 
     /// 面板开着时把图标留住：鼠标移去面板上就不算悬停这一行了，入口不能跟着消失

@@ -327,8 +327,8 @@ private struct TimelineRow: View {
             // 删除浮在 tag 左边，不追加在它右边：tag 于是永远钉在行尾，
             // 一排行的右边缘因此是齐的，悬停也不会让它跳位置。
             // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
-            if hovering && !editing.active {
-                TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
+            TodoDeleteButton(visible: hovering && !editing.active) {
+                withAnimation { store.deleteTodo(todo) }
             }
 
             if let category {

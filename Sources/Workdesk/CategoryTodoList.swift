@@ -106,7 +106,10 @@ struct CategoryTodoList: View {
         ScrollView {
             // 行与下面那片空白摞成一列；间距归零，空白紧贴着最后一行的下留白起头。
             VStack(spacing: 0) {
-                LazyVStack(spacing: 2) {
+                // 子树常开、行高不一，滚动会反复改变惰性列的可见行集合。
+                // macOS 上实测会困在布局与行生命周期的更新循环里，鼠标移开也不停；
+                // 这里一次排好整列，让滚动只改变视口，不再反复装卸待办与子树。
+                VStack(spacing: 2) {
                     ForEach(todos) { todo in
                         // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
                         if todo.isDeleted {
@@ -232,8 +235,8 @@ private struct TodoRow: View {
             }
 
             // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
-            if hovering && !editing.active {
-                TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
+            TodoDeleteButton(visible: hovering && !editing.active) {
+                withAnimation { store.deleteTodo(todo) }
             }
         }
         .todoRowChrome(hovering: hovering)

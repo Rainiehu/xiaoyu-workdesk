@@ -74,6 +74,8 @@ extension Color {
 /// 轴上它靠着分类 tag，另外两处它自己就是最右。
 /// 删完那一行原地变成占位（`DeletedTodoRow`），几秒内点撤销就回来。
 struct TodoDeleteButton: View {
+    // 悬停只改变显隐，不挤正文：滚动时鼠标逐行掠过，换行与行高都应留在原位。
+    var visible: Bool = true
     let delete: () -> Void
 
     var body: some View {
@@ -83,6 +85,10 @@ struct TodoDeleteButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .help("删除")
+        .opacity(visible ? 1 : 0)
+        .disabled(!visible)
+        .allowsHitTesting(visible)
+        .accessibilityHidden(!visible)
     }
 }
 

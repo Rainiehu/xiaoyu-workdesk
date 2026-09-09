@@ -77,8 +77,8 @@ private struct SubTodoRow: View {
             Spacer(minLength: 8)
 
             // 改写时不浮出删除：手正放在字上，旁边不该还摆着一个删得掉整条的按钮。
-            if hovering && !editing.active {
-                TodoDeleteButton { withAnimation { store.deleteTodo(todo) } }
+            TodoDeleteButton(visible: hovering && !editing.active) {
+                withAnimation { store.deleteTodo(todo) }
             }
         }
         .todoRowChrome(hovering: hovering)
