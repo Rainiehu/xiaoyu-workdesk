@@ -11,6 +11,7 @@ import WorkdeskCore
 /// 在分类里关心的是「有哪些事」，不是「排在哪天」。
 struct CategoryTodoList: View {
     @Environment(Store.self) private var store
+    @Environment(TreeComposer.self) private var composer
     let category: Category
 
     @State private var draft = ""
@@ -29,6 +30,12 @@ struct CategoryTodoList: View {
 
     /// 两列共同的上留白。
     private let topInset: CGFloat = 28
+
+    /// 左列行下那片「加小标题」空白的高度，由下面两个量算出：铺满可视区里行没占的那段，
+    /// 行多到滚起来时也至少留这么一截，滚到底总还点得着。
+    @State private var unfinishedViewportHeight: CGFloat = 0
+    @State private var unfinishedRowsHeight: CGFloat = 0
+    private let newSectionAreaMinHeight: CGFloat = 80
 
     var body: some View {
         let columns = store.columns(in: category.id)
@@ -57,11 +64,29 @@ struct CategoryTodoList: View {
             if blank {
                 empty
             } else {
-                list(todos)
+                list(todos, addsSectionsBelow: true)
                     .frame(maxWidth: unfinishedColumnMaxWidth, alignment: .leading)
                     .overlay { if todos.isEmpty { hint("都做完了") } }
             }
         }
+    }
+
+    /// 左列最后一行下面那片空白：右键「加小标题」，在末尾开一节新的。
+    /// 只铺在行的下面 —— 菜单若挂在整个列表上，行与行之间的缝、小标题上方那段留白也会接住右键，
+    /// 点在中间却在末尾生出一个小标题，人眼里就是「什么也没发生」。
+    /// 想把已有的几条分出一节，走行上的「在上方加小标题」。
+    private var newSectionArea: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: max(newSectionAreaMinHeight, unfinishedViewportHeight - unfinishedRowsHeight))
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("加小标题") {
+                    if let newID = store.addHeading(in: category.id) {
+                        composer.resumeEditingID = newID
+                    }
+                }
+            }
     }
 
     /// 右列：已经完成的事，按完成日从新到旧。整列淡化、字号小一号，
@@ -75,24 +100,40 @@ struct CategoryTodoList: View {
             .overlay { if todos.isEmpty { hint("打勾的事落到这边") } }
     }
 
-    private func list(_ todos: [TodoItem]) -> some View {
+    /// - Parameter addsSectionsBelow: 行下面铺一片接「加小标题」的空白。只有左列给 ——
+    ///   小标题只站在左列的手排顺序里，见 ADR-0009。
+    private func list(_ todos: [TodoItem], addsSectionsBelow: Bool = false) -> some View {
         ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(todos) { todo in
-                    // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
-                    if todo.isDeleted {
-                        DeletedTodoRow(todo: todo, tint: category.color.tint)
-                    } else {
-                        TodoRow(todo: todo, tint: category.color.tint)
-                        // 子树常开，就摊在行底下。右列也一样 —— 完成的事带着它的步骤
-                        // 一起退到背景里。
-                        SubTodoTree(parentID: todo.id, tint: category.color.tint)
+            // 行与下面那片空白摞成一列；间距归零，空白紧贴着最后一行的下留白起头。
+            VStack(spacing: 0) {
+                LazyVStack(spacing: 2) {
+                    ForEach(todos) { todo in
+                        // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
+                        if todo.isDeleted {
+                            DeletedTodoRow(todo: todo, tint: category.color.tint)
+                        } else if todo.isHeading {
+                            // 小标题只会出现在左列：右列的那份 `Store` 就没给。
+                            HeadingRow(heading: todo, tint: category.color.tint)
+                        } else {
+                            TodoRow(todo: todo, tint: category.color.tint)
+                            // 子树常开，就摊在行底下。右列也一样 —— 完成的事带着它的步骤
+                            // 一起退到背景里。
+                            SubTodoTree(parentID: todo.id, tint: category.color.tint)
+                        }
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if addsSectionsBelow { unfinishedRowsHeight = height }
+                }
+
+                if addsSectionsBelow { newSectionArea }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            if addsSectionsBelow { unfinishedViewportHeight = height }
         }
     }
 
@@ -200,7 +241,7 @@ private struct TodoRow: View {
         // 整行都抓得动，内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         // 已完成的也抓得动 —— 它排不了序，但照样可以拖到 tab 栏上换分类。
         .contentShape(Rectangle())
-        .todoRowEditing(todo, editing: $editing)
+        .todoRowEditing(todo, editing: $editing, addsHeadingAbove: reorderable)
         .draggable(DraggedTodo(id: todo.id)) { TodoDragPreview(text: todo.text, tint: tint) }
         // 落间换位、落身入怀：缝亮线、身亮圈。右列不接缝 —— 那儿的顺序不由人排，
         // 行上只剩「入怀」一件事。
@@ -209,4 +250,63 @@ private struct TodoRow: View {
         .resumesTreeEditing(todo, editing: $editing)
     }
 
+}
+
+/// 一个小标题：分类色胶囊，与未排期列的组头同一副 —— 胶囊在 app 里本就意味着「一组的开头」。
+/// 它下面、到下一个小标题之前的顶层待办就是这一节；节没有容器，只是手排顺序里的一道分界，
+/// 见 ADR-0009。
+///
+/// 胶囊不额外内缩，左缘与下面每一行悬停时那块底色对齐，一节读起来是一块 —— 与组头同一条理由。
+/// 行上能做的只有三样：单击改名、悬停浮出删除、整行拖走（整节跟着走）。没有勾圈、排期入口、
+/// 「移到分类」与「添加子待办」——那几格不是禁用，是小标题无此事。
+private struct HeadingRow: View {
+    @Environment(Store.self) private var store
+    @Environment(TreeComposer.self) private var composer
+    let heading: TodoItem
+    let tint: Color
+    @State private var hovering = false
+    @State private var editing = TodoEditing()
+
+    /// 胶囊上方多留的那一段：节与节之间靠它喘口气，比行距宽，又不至于把一节切成两块。
+    private let sectionGap: CGFloat = 12
+
+    var body: some View {
+        HStack(spacing: TodoRowLayout.spacing) {
+            // 改名接的是待办那一套键：回车收下改名并在这一节顶上开一行新待办，
+            // 空着按删除就是删掉这个小标题（Tab 在这儿挪不动，什么也不发生）。
+            TodoText(todo: heading, editing: $editing, tree: store, composer: composer)
+                .font(.caption.weight(.semibold))
+                // 改名时胶囊随字伸缩，不铺满整行 —— 留一点底宽，空着时也看得出是个胶囊。
+                .fixedSize(horizontal: editing.active, vertical: false)
+                .frame(minWidth: editing.active ? 48 : nil, alignment: .leading)
+                .categoryChip(tint)
+
+            Spacer(minLength: 8)
+
+            if hovering && !editing.active {
+                TodoDeleteButton { withAnimation { store.deleteTodo(heading) } }
+                    .padding(.trailing, TodoRowLayout.horizontalInset)
+            }
+        }
+        .padding(.vertical, 4)
+        .onHover { hovering = $0 }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("改写") { editing.begin(heading) }
+        }
+        .onTapGesture {
+            if !editing.active {
+                editing.begin(heading, at: NSApp.currentEvent?.locationInWindow)
+            }
+        }
+        .draggable(DraggedTodo(id: heading.id)) {
+            Text(heading.text).font(.caption.weight(.semibold)).categoryChip(tint)
+        }
+        // 落点与待办行同一副：缝换位、身上 —— 待办落上来成了这一节的第一条，
+        // 小标题落上来整节换到这儿（`Store.nestTodo` 分得清）。
+        .todoTreeDropTarget(heading, allowsGaps: true, tint: tint)
+        .resumesTreeEditing(heading, editing: $editing)
+        // 间隔放在落点外面：落点指示框住的是胶囊这一行，不连着上头那段空白。
+        .padding(.top, sectionGap)
+    }
 }

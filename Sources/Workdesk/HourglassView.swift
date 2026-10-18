@@ -378,9 +378,10 @@ struct CategoryTag: View {
 }
 
 extension View {
-    /// 分类的彩色胶囊。眼下只有未排期列的组头用它 —— 那儿的颜色是一整组的标题。
-    /// 着色取自分类 tab 选中态的那一套（`chipFill` / `chipStroke`），两处因此永远是同一个颜色。
-    fileprivate func categoryChip(_ tint: Color) -> some View {
+    /// 分类的彩色胶囊：一组的开头。未排期列的组头用它（那儿的颜色是一整组的标题），
+    /// 分类视图左列的小标题也用它 —— 同一个形状说同一件事，见 ADR-0009。
+    /// 着色取自分类 tab 选中态的那一套（`chipFill` / `chipStroke`），几处因此永远是同一个颜色。
+    func categoryChip(_ tint: Color) -> some View {
         foregroundStyle(tint)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)

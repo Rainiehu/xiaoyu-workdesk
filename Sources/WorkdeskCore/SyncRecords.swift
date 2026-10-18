@@ -84,6 +84,9 @@ extension TodoItem {
         record["order"] = order
         // 删除是打记号，不是抹掉：删除态的记录照常保存，靠这个字段说自己删了（ADR-0007）。
         record["deletedAt"] = deletedAt
+        // 小标题的记号只在小标题上写，待办的记录不多出这个字段 —— 与本地 JSON 同一副（ADR-0009）。
+        let heading: Bool? = isHeading ? true : nil
+        record["heading"] = heading
         return record
     }
 
@@ -105,7 +108,8 @@ extension TodoItem {
             completedAt: record["completedAt"] as? Date,
             plannedOn: record["plannedOn"] as? Date,
             order: record["order"] as? Int,
-            deletedAt: record["deletedAt"] as? Date
+            deletedAt: record["deletedAt"] as? Date,
+            isHeading: record["heading"] as? Bool ?? false
         )
     }
 }

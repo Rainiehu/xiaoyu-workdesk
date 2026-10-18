@@ -86,12 +86,14 @@ public struct TodoItem: Identifiable, Codable, Equatable {
     /// 删除时刻。删除是打记号，不是抹掉：有值就是删除态，从一切界面消失，记录永远留着。
     /// 其余字段一概不动 —— 撤销摘掉记号，它就原样回到原来的位置。见 ADR-0007。
     public var deletedAt: Date?
+    /// 落盘的那个小标题记号。可空只为读得进没有这个键的旧数据；待办行不写这个键。
+    private var heading: Bool?
 
     public init(
         id: UUID = UUID(), text: String, categoryID: Category.ID, parentID: TodoItem.ID? = nil,
         done: Bool = false,
         createdAt: Date = .now, completedAt: Date? = nil, plannedOn: Date? = nil, order: Int? = nil,
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil, isHeading: Bool = false
     ) {
         self.id = id
         self.text = text
@@ -103,9 +105,18 @@ public struct TodoItem: Identifiable, Codable, Equatable {
         self.plannedOn = plannedOn
         self.order = order
         self.deletedAt = deletedAt
+        self.heading = isHeading ? true : nil
     }
 
     public var isDeleted: Bool { deletedAt != nil }
+
+    /// 这一行是**小标题**，不是待办：分类视图左列里的一道分界，它下面、到下一个小标题之前的
+    /// 顶层待办就是这一节。借待办的记录存，是因为它要站进同一条手排的顺序里 ——
+    /// 位置、同步、删除记号与撤销窗口都现成可用，见 ADR-0009。
+    ///
+    /// 只有顶层，没有完成状态、计划日和子待办；不上轴、不进未排期列、不算徽标的数。
+    /// 生下来是什么就一直是什么 —— 待办与小标题之间不互相转换。
+    public var isHeading: Bool { heading == true }
 
     /// 过期：未完成，且计划日在「今天」之前。见 ADR-0004（修订了 ADR-0001 的「不设过期」）。
     ///
@@ -127,8 +138,9 @@ public struct TodoItem: Identifiable, Codable, Equatable {
 /// 视图层照着它决定要不要提示，而那句提示要说的数字也一并带回来，不必让它自己去数一遍。
 public enum CategoryDeletion: Equatable {
     case deleted
-    /// 里头还有这么多条待办（无论完成与否），所以没删，一条也没动。
-    case refused(todoCount: Int)
+    /// 里头还有这么多条待办（无论完成与否）和这么多个小标题，所以没删，一条也没动。
+    /// 两个数分开报：待办的疏通路子是移走或删掉，小标题只能删掉 —— 提示得说清是哪一样。
+    case refused(todoCount: Int, headingCount: Int = 0)
     /// 根本没这个分类。什么也没发生，也没什么好提示的。
     case noSuchCategory
 }

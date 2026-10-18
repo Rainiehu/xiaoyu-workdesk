@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import WorkdeskCore
+import WorkdeskUI
 
 /// 顶部那条可横滚的 tab 条：沙漏 + 各分类 + 新建。与 Mac 的 tab 栏同构 ——
 /// 沙漏在最左、分类依序排开，空间感原样成立。
@@ -76,6 +77,7 @@ struct CategoryTabChip: View {
     @State private var recoloring = false
     /// 刚刚有一次删除被拦下时，里头还剩多少条待办。
     @State private var refusedTodoCount = 0
+    @State private var refusedHeadingCount = 0
     @State private var refusedDeletion = false
     /// 有一条待办正悬在这个 tab 上方。松手它就归到这个分类。
     @State private var targeted = false
@@ -130,10 +132,13 @@ struct CategoryTabChip: View {
             .presentationDetents([.height(180)])
         }
         // 拦下来之后只说明为什么，不给「连同待办一起删」的入口 —— 那正是这条约束要防的事。
-        .alert("「\(category.name)」里还有待办", isPresented: $refusedDeletion) {
+        .alert(
+            CategoryDeletionRefusal.title(categoryName: category.name, todoCount: refusedTodoCount),
+            isPresented: $refusedDeletion
+        ) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("先把这 \(refusedTodoCount) 条待办移到别的分类，或者删掉，再来删这个分类。")
+            Text(CategoryDeletionRefusal.message(todoCount: refusedTodoCount, headingCount: refusedHeadingCount))
         }
     }
 
@@ -141,8 +146,9 @@ struct CategoryTabChip: View {
         switch store.deleteCategory(category.id) {
         case .deleted, .noSuchCategory:
             break
-        case .refused(let todoCount):
+        case .refused(let todoCount, let headingCount):
             refusedTodoCount = todoCount
+            refusedHeadingCount = headingCount
             refusedDeletion = true
         }
     }

@@ -1,6 +1,7 @@
 import SwiftUI
 import WorkdeskCore
 import UniformTypeIdentifiers
+import WorkdeskUI
 
 /// tab 栏上的一项。沙漏是唯一不代表分类的那一项，永远排在首位。
 enum MainlineTab: Hashable {
@@ -181,6 +182,7 @@ private struct CategoryTab: View {
     /// 刚刚有一次删除被拦下时，里头还剩多少条待办。非空分类删不掉这件事由 `Store` 判，
     /// 连同这个数字一起交回来，这儿只负责把话说清楚。
     @State private var refusedTodoCount = 0
+    @State private var refusedHeadingCount = 0
     @State private var refusedDeletion = false
     /// 有别的 tab 正悬在这个 tab 上方。松手它就落到这个位置上。
     @State private var targeted = false
@@ -218,10 +220,13 @@ private struct CategoryTab: View {
         }
         // 拦下来之后只说明为什么，不在这儿给「连同待办一起删」的入口 ——
         // 那正是这条约束要防的事。疏通的路子在待办行的右键菜单里。
-        .alert("「\(category.name)」里还有待办", isPresented: $refusedDeletion) {
+        .alert(
+            CategoryDeletionRefusal.title(categoryName: category.name, todoCount: refusedTodoCount),
+            isPresented: $refusedDeletion
+        ) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("先把这 \(refusedTodoCount) 条待办移到别的分类，或者删掉，再来删这个分类。")
+            Text(CategoryDeletionRefusal.message(todoCount: refusedTodoCount, headingCount: refusedHeadingCount))
         }
         .draggable(DraggedCategory(id: category.id))
         // 一个 tab 上只挂一个落点，两种载荷都由它接 —— 挂两个的话上面那个会把下面那个整个挡住，
@@ -258,8 +263,9 @@ private struct CategoryTab: View {
         switch store.deleteCategory(category.id) {
         case .deleted, .noSuchCategory:
             break
-        case .refused(let todoCount):
+        case .refused(let todoCount, let headingCount):
             refusedTodoCount = todoCount
+            refusedHeadingCount = headingCount
             refusedDeletion = true
         }
     }

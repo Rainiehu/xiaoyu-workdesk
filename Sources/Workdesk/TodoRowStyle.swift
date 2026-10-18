@@ -405,6 +405,9 @@ struct TodoRowMenuItems: View {
     @Environment(TreeComposer.self) private var composer
     let todo: TodoItem
     @Binding var editing: TodoEditing
+    /// 多一项「在上方加小标题」。只有分类视图左列的顶层行给 —— 小标题是那一列手排顺序里的
+    /// 分界，别处的行加出来的小标题落在一个眼前看不见的地方，见 ADR-0009。
+    var addsHeadingAbove = false
 
     var body: some View {
         Button("改写") { editing.begin(todo) }
@@ -412,6 +415,13 @@ struct TodoRowMenuItems: View {
             // 当场在孩子们末尾生一行空的，光标就位 —— 先有行、后有字。
             if let newID = store.addSubTodo("", under: todo.id) {
                 composer.resumeEditingID = newID
+            }
+        }
+        if addsHeadingAbove {
+            Button("在上方加小标题") {
+                if let newID = store.addHeading(before: todo.id) {
+                    composer.resumeEditingID = newID
+                }
             }
         }
         if todo.parentID != nil {
@@ -428,9 +438,11 @@ extension View {
     ///
     /// 单击接的是整行，不只是正文那几个字：行里的圈、日期、删除都是按钮，各自先接住自己的那一下，
     /// 不会落到这儿来。所以要摆在 `contentShape` 之后、`draggable` 之前，与整行抓得动那件事排好先后。
-    func todoRowEditing(_ todo: TodoItem, editing: Binding<TodoEditing>) -> some View {
+    func todoRowEditing(
+        _ todo: TodoItem, editing: Binding<TodoEditing>, addsHeadingAbove: Bool = false
+    ) -> some View {
         contextMenu {
-            TodoRowMenuItems(todo: todo, editing: editing)
+            TodoRowMenuItems(todo: todo, editing: editing, addsHeadingAbove: addsHeadingAbove)
         }
         .onTapGesture {
             // 顺手记下这一下点在窗口的哪儿：光标要落在点到的那个字上，不是全选。

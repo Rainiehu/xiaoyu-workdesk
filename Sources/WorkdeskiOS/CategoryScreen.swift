@@ -42,6 +42,8 @@ struct CategoryScreen: View {
                     // 删除态的行是原位占位：撤销窗口开着的那几秒它还站在这儿，见 ADR-0007。
                     if todo.isDeleted {
                         DeletedTodoRow(todo: todo, tint: category.color.tint)
+                    } else if todo.isHeading {
+                        HeadingRow(heading: todo, tint: category.color.tint)
                     } else {
                         CategoryRow(todo: todo, tint: category.color.tint)
                         // 子树常开，就摊在行底下 —— 与 Mac 同一条规矩。
@@ -147,6 +149,57 @@ private struct CategoryRow: View {
 
     private func deleteTodo() {
         withAnimation { store.deleteTodo(todo) }
+    }
+}
+
+/// 一个小标题：分类色胶囊，与 Mac 同一副 —— 它下面、到下一个小标题之前的待办就是这一节，
+/// 节没有容器，只是手排顺序里的一道分界，见 ADR-0009。
+///
+/// 单击改名（回车收下并在这一节顶上开一行新待办）、左滑删除（只删这道分界，下面的待办并入上一节）；
+/// 拖着的待办悬上来就换到它的位置 —— 越过它就换了一节。这一版欠着两件，与 `SubTodoTree.swift`
+/// 头上那几笔同一本账：**新建**的入口跟长按菜单那一轮一起回来（Mac 走右键）；
+/// **拖小标题整节跟着走**等自绘拖拽那一轮 —— 「悬到哪当场换到哪」的活重排拖着一整节，
+/// 一路上会把别的节拦腰截开，得等落点能吸到节与节的交界上再做。
+private struct HeadingRow: View {
+    @Environment(Store.self) private var store
+    @Environment(TreeComposer.self) private var composer
+    let heading: TodoItem
+    let tint: Color
+
+    @State private var editing = TodoEditing()
+
+    var body: some View {
+        HStack(spacing: TodoRowLayout.spacing) {
+            TodoText(todo: heading, editing: $editing, tree: store, composer: composer)
+                .font(.caption.weight(.semibold))
+                // 改名时胶囊随字伸缩，不铺满整行 —— 留一点底宽，空着时也看得出是个胶囊。
+                .fixedSize(horizontal: editing.active, vertical: false)
+                .frame(minWidth: editing.active ? 48 : nil, alignment: .leading)
+                .categoryChip(tint)
+            Spacer(minLength: 8)
+        }
+        // 胶囊不额外内缩，左缘与下面每一行的内缩起点对齐 —— 一节读起来是一块。
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        // 改名走单击，不挂长按菜单：行上那份菜单只剩「移到分类」，小标题无此事。
+        .onTapGesture {
+            if !editing.active { editing.begin(heading) }
+        }
+        .todoDropTarget(entered: { id in
+            guard id != heading.id else { return }
+            withAnimation(.spring(duration: 0.2)) {
+                if store.reorderTodo(id, onto: heading.id) {
+                    Buzz.light.impactOccurred(); Buzz.warm()
+                }
+            }
+        }, perform: { _ in
+            Buzz.notify.notificationOccurred(.success)
+            return true
+        })
+        .resumesTreeEditing(heading, editing: $editing)
+        .swipeToDelete { withAnimation { store.deleteTodo(heading) } }
+        // 节与节之间多留的那一段，放在左滑与落点外面：拖的、划的都是胶囊这一行。
+        .padding(.top, 10)
     }
 }
 #endif

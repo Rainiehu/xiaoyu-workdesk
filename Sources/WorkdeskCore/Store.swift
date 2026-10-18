@@ -285,8 +285,13 @@ public final class Store {
     public func deleteCategory(_ id: Category.ID) -> CategoryDeletion {
         guard let index = categories.firstIndex(where: { $0.id == id }), !categories[index].isDeleted
         else { return .noSuchCategory }
+        // 小标题也拦：它是使用者写下的记录，与步骤同一个道理（ADR-0008）——
+        // 只是报数时分开说，它的疏通路子只有删掉一条。
         let living = livingTodos(in: id)
-        guard living.isEmpty else { return .refused(todoCount: living.count) }
+        guard living.isEmpty else {
+            let headings = living.filter(\.isHeading).count
+            return .refused(todoCount: living.count - headings, headingCount: headings)
+        }
         categories[index].deletedAt = .now
         saveCategories()
         logSyncChange { log in
@@ -340,9 +345,9 @@ public final class Store {
 
     /// 侧边栏徽标要的数字。派生数据一律从这里出，视图层不自己聚合。
     /// 删除态的不算 —— 占位还站在原位，但那件事已经不在「要做」的名下了。
-    /// 子待办也不算：徽标数的是**事**，一件带五步的事是一件事，不是六件。
+    /// 子待办也不算：徽标数的是**事**，一件带五步的事是一件事，不是六件。小标题更不是事。
     public var unfinishedTodoCount: Int {
-        todos.filter { !$0.done && !$0.isDeleted && $0.parentID == nil }.count
+        todos.filter { !$0.done && !$0.isDeleted && $0.parentID == nil && !$0.isHeading }.count
     }
 
     /// 沙漏视图要的分组：所有分类中排了计划日的待办，按计划日铺成一条轴，日期升序。
@@ -362,7 +367,8 @@ public final class Store {
         for todo in todos {
             // 轴上只有顶层：子待办是父的内部结构，没有自己的计划日，不单独占一行。
             // （正常路径上子待办的 plannedOn 恒为空，这里再挡一道是防同步合出来的怪状态。）
-            guard let planned = todo.plannedOn, todo.parentID == nil else { continue }
+            // 小标题同理：它是分类视图左列的分界，与日子无关。
+            guard let planned = todo.plannedOn, todo.parentID == nil, !todo.isHeading else { continue }
             if hidesCompletedOnTimeline && todo.done { continue }
             byDay[planned.dayStart, default: []].append(todo)
         }
@@ -387,7 +393,8 @@ public final class Store {
         categories.compactMap { category in
             let mine = Self.ordered(todos(in: category.id).filter {
                 // 这一列同样只有顶层：步骤不是「还没安排的事」，它跟着父走。
-                !$0.done && $0.plannedOn == nil && $0.parentID == nil
+                // 小标题也不进来 —— 节只在分类视图左列里有意义，见 ADR-0009。
+                !$0.done && $0.plannedOn == nil && $0.parentID == nil && !$0.isHeading
             })
             return mine.isEmpty ? nil : UnscheduledGroup(category: category, todos: mine)
         }
@@ -415,12 +422,17 @@ public final class Store {
     ///
     /// 两列铺的都只是**顶层**：归哪列只看顶层的完成状态，子待办打了勾也不迁列，
     /// 就在父的树里原地显示为已勾；父完成了，整棵树跟着父行去右列。
+    ///
+    /// 小标题站在左列的手排顺序里，就在它该在的位置上；右列是按完成日排的记录，不分节，
+    /// 见 ADR-0009。
     public func columns(in categoryID: Category.ID) -> CategoryColumns {
         let mine = todos(in: categoryID).filter { $0.parentID == nil }
-        let unfinished = Self.ordered(mine.filter { !$0.done })
+        // 小标题没有完成状态，不看 `done` —— 万一同步合出一个打了勾的，它也还站在左列，
+        // 不至于两列都不见、却仍拦着删分类。
+        let unfinished = Self.ordered(mine.filter { !$0.done || $0.isHeading })
         // 打了勾就必然有完成日；万一数据里缺了，退回创建日 ——
         // 宁可这一条排得不准，也不让它从两列里消失。
-        let finished = mine.filter(\.done)
+        let finished = mine.filter { $0.done && !$0.isHeading }
             .sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
         return CategoryColumns(unfinished: unfinished, finished: finished)
     }
@@ -497,6 +509,7 @@ public final class Store {
     /// 于是同一天完成的几条仍分得出先后。取消打勾就把它清掉，
     /// 于是「没有完成日」和「没完成」永远是同一件事。
     public func toggleTodo(_ item: TodoItem) {
+        guard !isHeading(item.id) else { return }
         update(item.id) {
             $0.done.toggle()
             $0.completedAt = $0.done ? .now : nil
@@ -516,7 +529,9 @@ public final class Store {
     }
 
     /// 排上计划日，或改到另一天。只动计划日 —— 创建日与完成日各存各的，改期碰不到它们。
+    /// 小标题没有计划日，排期的几条路在它身上都不发生。
     public func setPlannedDay(_ day: Date, for item: TodoItem) {
+        guard !isHeading(item.id) else { return }
         update(item.id) { $0.plannedOn = day }
     }
 
@@ -530,12 +545,14 @@ public final class Store {
     ///   视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
     public func reschedule(_ id: TodoItem.ID, to day: Date) -> Bool {
-        update(id) { $0.plannedOn = day }
+        guard !isHeading(id) else { return false }
+        return update(id) { $0.plannedOn = day }
     }
 
     /// 清除计划日，待办回到未排期。未排期是个正常状态，不是缺失 ——
     /// 「总得做但不急」的事就该一直待在这儿。
     public func clearPlannedDay(_ item: TodoItem) {
+        guard !isHeading(item.id) else { return }
         update(item.id) { $0.plannedOn = nil }
     }
 
@@ -568,11 +585,12 @@ public final class Store {
     ///
     /// 只有顶层能换分类 —— 子待办的分类跟着根走，子行上本没有「移到分类」这回事。
     /// 换的是整棵树：名下的子待办（不论几层）一并跟过去，树永远在同一个分类里。
+    /// 小标题也换不了：节只在自己那个分类的顺序里才有意义，搬过去就只剩一句孤零零的字。
     /// - Returns: 这一移是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
     public func moveTodo(_ id: TodoItem.ID, to categoryID: Category.ID) -> Bool {
         guard category(categoryID) != nil,
-              let item = todos.first(where: { $0.id == id }),
+              let item = todos.first(where: { $0.id == id }), !item.isHeading,
               item.parentID == nil, item.categoryID != categoryID else { return false }
         let top = topOrder(in: categoryID)
         let moved = update(id) {
@@ -612,6 +630,12 @@ public final class Store {
               let moved = todos.first(where: { $0.id == id }),
               let target = todos.first(where: { $0.id == targetID }),
               moved.siblingGroup == target.siblingGroup else { return false }
+        if moved.isHeading {
+            // 与单行同一个手感：往下放落在目标后头，往上放落在目标前头。
+            let queue = Self.ordered(siblings(of: moved.siblingGroup))
+            let downward = (queue.firstIndex { $0.id == targetID } ?? 0) > (queue.firstIndex { $0.id == id } ?? 0)
+            return moveSection(of: moved, to: targetID, offset: downward ? 1 : 0)
+        }
         // 整组兄弟一起排 —— 已完成的也在这条队伍里，它们此刻在右列，但取消打勾就回到左列。
         var queue = Self.ordered(siblings(of: moved.siblingGroup))
         guard let from = queue.firstIndex(where: { $0.id == id }),
@@ -682,6 +706,86 @@ public final class Store {
         saveTodos()
     }
 
+    // MARK: - 小标题
+
+    /// 在左列一行的上方加一个小标题。先有行、后有字：生下来是空的，光标随后就位；
+    /// 没写字就走的由 `discardEmptyTodo` 悄悄收走，与回车新开的行同一条路。
+    /// 从那一行起、到下一个小标题之前，就成了这一节。
+    ///
+    /// 只认顶层的行 —— 小标题是左列的分界，不进子树。那一行不在、在删除态、
+    /// 或它的分类不在，都什么也不发生。
+    /// - Returns: 新小标题的 id，视图层拿它把光标接上去。
+    @discardableResult
+    public func addHeading(before rowID: TodoItem.ID) -> TodoItem.ID? {
+        guard let row = todos.first(where: { $0.id == rowID }), !row.isDeleted, row.parentID == nil,
+              category(row.categoryID) != nil else { return nil }
+        return insertHeading(in: row.categoryID, before: rowID)
+    }
+
+    /// 在一个分类的末尾加一个小标题 —— 左列空白处右键走这条路，好开一节新的。
+    /// 末尾指整条顺序的末尾，已完成的也在它前头：它们取消打勾时回到原来那一节，不被新标题收走。
+    @discardableResult
+    public func addHeading(in categoryID: Category.ID) -> TodoItem.ID? {
+        guard category(categoryID) != nil else { return nil }
+        return insertHeading(in: categoryID, before: nil)
+    }
+
+    /// - Parameter rowID: 落在这一行前头；`nil` 落在末尾。
+    private func insertHeading(in categoryID: Category.ID, before rowID: TodoItem.ID?) -> TodoItem.ID {
+        let group = SiblingGroup(categoryID: categoryID, parentID: nil)
+        var queue = Self.ordered(siblings(of: group))
+        let heading = TodoItem(text: "", categoryID: categoryID, isHeading: true)
+        todos.append(heading)
+        queue.insert(heading, at: rowID.flatMap { id in queue.firstIndex { $0.id == id } } ?? queue.count)
+        // 编号把整窝兄弟（含新标题）一起记上账，新标题自己的保存也在其中。
+        renumber(group, as: queue)
+        saveTodos()
+        return heading.id
+    }
+
+    /// 这一条是不是小标题。只认 id —— 拖着走的一路上、视图层手里的旧副本，都只靠得住它。
+    private func isHeading(_ id: TodoItem.ID) -> Bool {
+        todos.first { $0.id == id }?.isHeading == true
+    }
+
+    /// 拖小标题，整节跟着走：小标题连同它这一节（到下一个活着的小标题之前的顶层兄弟，
+    /// 已完成的、删除态占位的都算）一起挪到目标旁边。撤销窗口里的小标题已不是分界 ——
+    /// 它那一节此刻归上一节管，跟着一起走；撤销时它在这一块里原位回来。
+    ///
+    /// 一节只能落在节与节的交界上 —— 落进别人那一节的半中间，会把那一节拦腰截走后半截。
+    /// 所以落点按挪动的方向吸到最近的交界：往上挪吸到那一节的前头，往下挪吸到那一节的后头。
+    /// 顶上不带标题的那一块永远在最上面，往上吸也只吸到第一个小标题前头。
+    /// 落进自己这一节里就是没挪，什么也不发生。
+    /// - Parameter offset: 0 落在目标前头，1 落在目标后头 —— 吸附之前的那个原始落点。
+    private func moveSection(of heading: TodoItem, to targetID: TodoItem.ID, offset: Int) -> Bool {
+        guard !heading.isDeleted, let target = todos.first(where: { $0.id == targetID }),
+              target.parentID == nil, target.categoryID == heading.categoryID else { return false }
+        let group = heading.siblingGroup
+        var rest = Self.ordered(siblings(of: group))
+        guard let start = rest.firstIndex(where: { $0.id == heading.id }) else { return false }
+        let isBoundary = { (item: TodoItem) in item.isHeading && !item.isDeleted }
+        let end = rest[(start + 1)...].firstIndex(where: isBoundary) ?? rest.count
+        let section = Array(rest[start..<end])
+        guard !section.contains(where: { $0.id == targetID }) else { return false }
+        rest.removeSubrange(start..<end)
+        guard let t = rest.firstIndex(where: { $0.id == targetID }) else { return false }
+        let raw = t + offset
+        let boundaries = rest.indices.filter { isBoundary(rest[$0]) } + [rest.count]
+        let at: Int =
+            if boundaries.contains(raw) {
+                raw
+            } else if raw < start, let before = boundaries.last(where: { $0 <= raw }) {
+                before
+            } else {
+                boundaries.first { $0 >= raw } ?? rest.count
+            }
+        guard at != start else { return false }
+        rest.insert(contentsOf: section, at: at)
+        renumber(group, as: rest)
+        saveTodos()
+        return true
+    }
+
     // MARK: - 子待办的树
 
     /// 一条待办的直接子待办，按兄弟间的位置从上到下 —— 三处常开的树都照这份铺。
@@ -707,14 +811,15 @@ public final class Store {
     /// 在一条待办下面添一步。子待办生在**兄弟末尾** —— 步骤有天然先后，人是按
     /// 1、2、3 的顺序写的，追加在尾才保得住书写顺序（顶层「新记的落最上面」为的是
     /// 「最近的最要紧」，这里刻意不同）。归属分类跟着父；没有自己的计划日。
-    /// 父不在或在删除态就什么也不发生 —— 不给死人添孩子。
+    /// 父不在或在删除态就什么也不发生 —— 不给死人添孩子。小标题也不行：它不是事，拆不出步骤。
     ///
     /// 空正文也生，与 `addTodo(_:after:)` 同一个道理：「添加子待办」开的是先有行、
     /// 后有字的新行，没写字就走的由 `discardEmptyTodo` 悄悄收走。
     /// - Returns: 新待办的 id，视图层拿它把光标接到新行上。
     @discardableResult
     public func addSubTodo(_ text: String, under parentID: TodoItem.ID) -> TodoItem.ID? {
-        guard let parent = todos.first(where: { $0.id == parentID }), !parent.isDeleted
+        guard let parent = todos.first(where: { $0.id == parentID }), !parent.isDeleted,
+              !parent.isHeading
         else { return nil }
         let group = SiblingGroup(categoryID: parent.categoryID, parentID: parentID)
         let item = TodoItem(
@@ -734,10 +839,21 @@ public final class Store {
     /// 挂进怀里就离开轴：子待办没有计划日，这一挂顺手撤掉排期 —— 不是一次动了两样，
     /// 是「步骤不单独排期」这条定义的直接推论。完成状态与三个日子里的另两个原样带着。
     /// 挂到自己肚子里不行（目标是自己或自己的子孙），目标在删除态也不行。
+    ///
+    /// 小标题没有怀：待办落在小标题身上，就成了这一节的第一条（子待办落上来随之升到顶层）。
+    /// 小标题自己也挂不到谁下面 —— 它落在顶层哪一行身上，都当作「放到那一行的位置上」，
+    /// 整节挪过去、吸到最近的交界，与 `reorderTodo` 同一副手感；落在子树里的行上不接。
+    /// 见 ADR-0009。
     /// - Returns: 这一挂是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
     public func nestTodo(_ id: TodoItem.ID, under targetID: TodoItem.ID) -> Bool {
         guard let target = todos.first(where: { $0.id == targetID }) else { return false }
+        if isHeading(id) {
+            return reorderTodo(id, onto: targetID)
+        }
+        if target.isHeading {
+            return place(id, at: targetID, offset: 1)
+        }
         return relocate(id, under: targetID, in: target.categoryID, at: nil)
     }
 
@@ -757,6 +873,9 @@ public final class Store {
 
     private func place(_ id: TodoItem.ID, at targetID: TodoItem.ID, offset: Int) -> Bool {
         guard id != targetID, let target = todos.first(where: { $0.id == targetID }) else { return false }
+        if let heading = todos.first(where: { $0.id == id }), heading.isHeading {
+            return moveSection(of: heading, to: targetID, offset: offset)
+        }
         // 顶层的缝只管换位，不管换窝：改归属是把它拖到 tab 上的事，一次只动一样
         // （ADR-0003）—— 未排期列里跨分类组的缝不接。子树里的缝随树走，
         // 入怀（落在行身上）走的是 `nestTodo`，不从这儿过。
@@ -770,11 +889,13 @@ public final class Store {
 
     /// Tab 那一下：挂到上一个活着的兄弟下面，成为它的末子。头一个兄弟没有「上一个」，
     /// 什么也不发生 —— 缩不进去就是缩不进去，不发明别的去处。
+    /// 上一个是小标题时同理：小标题没有怀，一节的第一条缩不进去。
     @discardableResult
     public func indentTodo(_ id: TodoItem.ID) -> Bool {
-        guard let item = todos.first(where: { $0.id == id }) else { return false }
+        guard let item = todos.first(where: { $0.id == id }), !item.isHeading else { return false }
         let queue = Self.ordered(siblings(of: item.siblingGroup)).filter { !$0.isDeleted }
-        guard let i = queue.firstIndex(where: { $0.id == id }), i > 0 else { return false }
+        guard let i = queue.firstIndex(where: { $0.id == id }), i > 0,
+              !queue[i - 1].isHeading else { return false }
         return nestTodo(id, under: queue[i - 1].id)
     }
 
@@ -798,9 +919,10 @@ public final class Store {
               category(categoryID) != nil else { return false }
         if let newParent {
             // 挂到自己肚子里会把整棵树拎离地面 —— 自己、或自己的子孙，都不接。
-            guard newParent != id, !descendantIDs(of: id).contains(newParent),
+            // 小标题两头都不沾：它挂不到谁下面，谁也挂不到它下面。
+            guard newParent != id, !item.isHeading, !descendantIDs(of: id).contains(newParent),
                   let parent = todos.first(where: { $0.id == newParent }), !parent.isDeleted,
-                  parent.categoryID == categoryID else { return false }
+                  !parent.isHeading, parent.categoryID == categoryID else { return false }
         }
         let oldGroup = item.siblingGroup
         let newGroup = SiblingGroup(categoryID: categoryID, parentID: newParent)

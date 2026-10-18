@@ -145,11 +145,7 @@ struct CategoryTag: View {
         if chip {
             Text(category.name)
                 .font(.caption)
-                .foregroundStyle(category.color.tint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(category.color.tint.chipFill))
-                .overlay(Capsule().stroke(category.color.tint.chipStroke, lineWidth: 1))
+                .categoryChip(category.color.tint)
         } else {
             Text(category.name)
                 .font(.caption)
@@ -159,6 +155,16 @@ struct CategoryTag: View {
 }
 
 extension View {
+    /// 分类的彩色胶囊：一组的开头。未排期面板的组头与分类屏的小标题同用这一副 ——
+    /// 同一个形状说同一件事，与 Mac 的同名件一致，见 ADR-0009。
+    func categoryChip(_ tint: Color) -> some View {
+        foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(tint.chipFill))
+            .overlay(Capsule().stroke(tint.chipStroke, lineWidth: 1))
+    }
+
     /// 一行待办的内缩。三处都从这儿走，改一处三处一起动。
     func todoRowChrome() -> some View {
         padding(.horizontal, TodoRowLayout.horizontalInset)
