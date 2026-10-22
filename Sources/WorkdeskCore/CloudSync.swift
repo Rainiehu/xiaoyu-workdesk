@@ -12,19 +12,28 @@ import UIKit
 /// 同步的持久性故障。日常是 `nil`，界面上什么也没有；
 /// 瞬时的网络抖动、一两次没送出去，都轮不到在这儿露面。
 public enum SyncTrouble: Equatable {
-    /// 这台 Mac 没有登录 iCloud。
+    /// 这台设备没有登录 iCloud。
     case noAccount
     /// iCloud 储存空间满了，推不上去。
     case quotaExceeded
     /// 连续多日没同步成功 —— 多半是网络或服务一直不通。
     case stale(days: Int)
 
+    /// 上架之后没登录 iCloud 的人多了起来，iPhone 上说「这台 Mac」就成了错话。
+    private static var deviceName: String {
+        #if os(iOS)
+        "手机"
+        #else
+        " Mac "
+        #endif
+    }
+
     /// 点开记号看到的那句话。都以「本机的一切完好」收尾 —— 故障说的是云端那条路，
     /// 不是这台机器上的数据，这一点每次都值得说清。
     public var explanation: String {
         switch self {
         case .noAccount:
-            "这台 Mac 没有登录 iCloud，改动暂时只在本机。\n登录之后同步自己会接上，本机的一切完好。"
+            "这台\(Self.deviceName)没有登录 iCloud，改动暂时只在本机。\n登录之后同步自己会接上，本机的一切完好。"
         case .quotaExceeded:
             "iCloud 储存空间满了，新的改动暂时推不上去。\n本机的一切完好，云端腾出地方后会自动补上。"
         case .stale(let days):
@@ -84,10 +93,11 @@ public final class CloudSync: CKSyncEngineDelegate {
         // 模拟器就当单机 app 验证界面，同步的验证在真机上做。
         return false
         #elseif os(iOS)
-        // 插线直装的开发构建总封着 embedded.mobileprovision，entitlement 随 profile 走 ——
-        // 有它就是有门票。（App Store/TestFlight 构建没有这个文件，但那不是这个 app 的路，
-        // 见 ADR-0006。）
-        return Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") != nil
+        // 真机构建一律带着 iCloud entitlement：不带就装不上这台手机。不能拿
+        // embedded.mobileprovision 当门票 —— 插线直装的有它，App Store/TestFlight 的没有，
+        // 拿它判断，上架版就悄悄退成单机（ADR-0010）。没登录 iCloud 是账号的事，
+        // 交给引擎的账号事件与 accountStatus，不在这儿拦。
+        return true
         #else
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(task, "com.apple.developer.icloud-services" as CFString, nil)

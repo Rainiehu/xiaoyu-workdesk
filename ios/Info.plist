@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 大部分键由 Xcode 按 INFOPLIST_KEY_* 生成，这里只放生成不了的，两份合并。 -->
+	<!-- CKSyncEngine 靠静默推送得知云端有变；没有这一项，手机只在回到前台时才去拉。 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<!-- 只用系统的 HTTPS 与 CloudKit 加密，属豁免；写明了，每次上传就不再追问出口合规。 -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

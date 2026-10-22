@@ -12,6 +12,6 @@
 - iOS 构建走一个最小 Xcode 工程（真机部署、签名、iCloud entitlement 都绕不开 Xcode），工程引用本仓库的 SwiftPM 包；SPM 直接构建的仍是 Mac 那份。
 - 最低 iOS 17 —— CKSyncEngine 的硬要求，别无选择。
 - 同一个 CloudKit 容器，不然就不是「同一份待办」。
-- 开发者证书插线直装，不走 TestFlight / App Store —— 一个人的 app，审核与分发是为不存在的听众付成本；哪天想不插线更新再补 TestFlight，两条路不冲突。
+- 开发者证书插线直装，不走 TestFlight / App Store —— 一个人的 app，审核与分发是为不存在的听众付成本；哪天想不插线更新再补 TestFlight，两条路不冲突。（已被 [ADR-0010](0010-app-store-separate-cloudkit-environments.md) 改掉：上架给别人用，自用仍插线直装。）
 - 收藏流不上 iOS 界面，但共享核心照旧同步收藏 —— 数据在，界面不画；同步范围仍是待办、分类与收藏。
 - 域语言单份不复制：根 CONTEXT.md 是概念与跨端规矩的唯一出处，CONTEXT-iOS.md 只写呈现 —— 概念写两遍就埋下漂移的种子。

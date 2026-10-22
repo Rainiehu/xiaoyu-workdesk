@@ -13,6 +13,7 @@
 		BB0000000000000000000101 /* WorkdeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* WorkdeskApp.swift */; };
 		BB0000000000000000000102 /* WorkdeskiOS in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000000000000000000901 /* WorkdeskiOS */; };
 		BB0000000000000000000103 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000004 /* Assets.xcassets */; };
+		BB0000000000000000000104 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000006 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +21,8 @@
 		BB0000000000000000000002 /* WorkdeskiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WorkdeskiOS.entitlements; sourceTree = "<group>"; };
 		BB0000000000000000000003 /* Workdesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Workdesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB0000000000000000000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		BB0000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		BB0000000000000000000006 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -40,6 +43,8 @@
 				BB0000000000000000000303 /* App */,
 				BB0000000000000000000004 /* Assets.xcassets */,
 				BB0000000000000000000002 /* WorkdeskiOS.entitlements */,
+				BB0000000000000000000005 /* Info.plist */,
+				BB0000000000000000000006 /* PrivacyInfo.xcprivacy */,
 				BB0000000000000000000302 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -125,6 +130,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BB0000000000000000000103 /* Assets.xcassets in Resources */,
+				BB0000000000000000000104 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -172,6 +178,7 @@
 				DEVELOPMENT_TEAM = C5LAP7CQG9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "案头";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -196,6 +203,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = C5LAP7CQG9;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "案头";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
