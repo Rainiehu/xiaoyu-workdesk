@@ -7,7 +7,7 @@ public enum CategoryDeletionRefusal {
     }
 
     /// 末尾补一句归档：多半人想删的是一个告一段落的分类，要的只是它别再占着 tab 栏 ——
-    /// 那条路不必先清空，见 ADR-0010。已经归档了的就不再提。
+    /// 那条路不必先清空，见 ADR-0011。已经归档了的就不再提。
     public static func message(todoCount: Int, headingCount: Int, isArchived: Bool = false) -> String {
         let clearing: String
         if headingCount == 0 {

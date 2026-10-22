@@ -3,12 +3,15 @@ import SwiftUI
 import WorkdeskCore
 import WorkdeskUI
 
-/// tab 条末端的档案盒：与 Mac 同一副规矩 —— 有归档的分类才露面，点开是档案名单，
-/// 点一个就在内容区看它，那时盒子是选中态、穿着那个分类的颜色。见 ADR-0010。
+/// tab 条最右端的档案盒：钉住不随 tab 滚动，在同步记号左边 —— 与 Mac 钉在标语右边同一个意思：
+/// 它不是一个分类，不排进那一排里。有归档的分类才露面，点开是档案名单，
+/// 点一个就在内容区看它，那时盒子是选中态、穿着那个分类的颜色。见 ADR-0011。
 struct ArchiveBox: View {
     @Environment(Store.self) private var store
     let selected: MainlineTab
     let select: (MainlineTab) -> Void
+    /// 右边还挨着同步记号：两样各说各的事，中间隔一道细竖线。线跟着盒子走 —— 盒子不在，线也不在。
+    var dividedFromRight = false
     @State private var presented = false
     /// 收进去一个就加一：盒子只在「有东西进来」时跳，取回、删掉都不跳 ——
     /// 这一跳说的是「它去了这儿」。
@@ -24,7 +27,12 @@ struct ArchiveBox: View {
         // 盒子常驻在视图树里、空了才不画：名单挂在它身上，在名单里取回最后一个时
         // 挂点若跟着没了，名单就是被硬拆掉的。名单开着时盒子留着，空了就收名单。
         ZStack {
-            if !store.archivedCategories.isEmpty || presented { box }
+            if !store.archivedCategories.isEmpty || presented {
+                HStack(spacing: 6) {
+                    box
+                    if dividedFromRight { Divider().frame(height: 16) }
+                }
+            }
         }
         .onChange(of: store.archivedCategories.count) { old, new in
             if new > old { arrivals += 1 }

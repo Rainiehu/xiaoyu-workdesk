@@ -5,7 +5,7 @@ import Testing
 @testable import WorkdeskCore
 
 /// 归档：分类连同名下的一切从主线上撤下，只在档案里看得见；取回原样回来。
-/// 待办一条不动 —— 撤下的只是「在哪儿露面」，见 ADR-0010。
+/// 待办一条不动 —— 撤下的只是「在哪儿露面」，见 ADR-0011。
 @MainActor
 @Suite("归档分类")
 struct ArchiveTests {

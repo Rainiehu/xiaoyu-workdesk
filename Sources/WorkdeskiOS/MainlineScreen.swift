@@ -41,31 +41,15 @@ struct MainlineScreen: View {
             } else {
                 TabStrip(
                     selected: selected,
-                    select: { tab in
-                        // 换了才嗒一声 —— 点已经站着的 tab 没有「切换」可言。
-                        if tab != selected { Buzz.select.selectionChanged() }
-                        selection = tab
-                    },
+                    select: select,
                     newCategory: { naming = true },
-                    trailingInset: sync.active ? 44 : 0
+                    trailingInset: pinnedWidth
                 )
-                // 同步记号浮在 tab 条右端上方 —— 分类再多、横着滚起来它也留在原处。
+                // 档案盒与同步记号浮在 tab 条右端上方 —— 分类再多、横着滚起来它们也留在原处：
+                // 两样都不是分类，不排进那一排里。
                 // 身下垫一道纸色渐变：胶囊滑到它跟前是淡出去，不是被一刀切掉。
-                // 只在同步真开着的构建里挂：单机构建不该挂一朵云说谎。
-                .overlay(alignment: .trailing) {
-                    if sync.active {
-                        HStack(spacing: 0) {
-                            LinearGradient(
-                                colors: [PaperTheme.paper.opacity(0), PaperTheme.paper],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                            .frame(width: 24)
-                            SyncMark()
-                                .padding(.trailing, 10)
-                                .background(PaperTheme.paper)
-                        }
-                    }
-                }
+                // 同步记号只在同步真开着的构建里挂：单机构建不该挂一朵云说谎。
+                .overlay(alignment: .trailing) { pinnedTrailing }
                 // tab 条与内容之间不画线：靠 tab 条自身的高度与留白分界，
                 // 与输入栏同一条处理 —— 整张纸从上到下连成一体。
                 content
@@ -83,6 +67,46 @@ struct MainlineScreen: View {
                 draftName = ""
             }
             Button("取消", role: .cancel) { draftName = "" }
+        }
+    }
+
+    /// 换了才嗒一声 —— 点已经站着的 tab 没有「切换」可言。tab 条与档案盒同一条路。
+    private func select(_ tab: MainlineTab) {
+        if tab != selected { Buzz.select.selectionChanged() }
+        selection = tab
+    }
+
+    /// 档案盒露着没有。与 `ArchiveBox` 自己的判断同一个来源 —— 留白跟着它伸缩。
+    private var showsArchiveBox: Bool { !store.archivedCategories.isEmpty }
+
+    /// tab 条右端被浮盖的宽度：档案盒 34、同步记号 34，两样都在时中间一道线连两侧间距 13，
+    /// 末尾再让 10。滚到头时最后一枚胶囊因此整个走得出来。
+    private var pinnedWidth: CGFloat {
+        switch (showsArchiveBox, sync.active) {
+        case (true, true): 34 + 13 + 34 + 10
+        case (true, false), (false, true): 34 + 10
+        case (false, false): 0
+        }
+    }
+
+    /// 钉在 tab 条右端的那一块。档案盒常驻在视图树里（它的名单挂在它身上，见 `ArchiveBox`），
+    /// 渐变和纸色底只在真有东西露着时才垫。
+    private var pinnedTrailing: some View {
+        let shows = showsArchiveBox || sync.active
+        return HStack(spacing: 0) {
+            if shows {
+                LinearGradient(
+                    colors: [PaperTheme.paper.opacity(0), PaperTheme.paper],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 24)
+            }
+            HStack(spacing: 6) {
+                ArchiveBox(selected: selected, select: select, dividedFromRight: sync.active)
+                if sync.active { SyncMark() }
+            }
+            .padding(.trailing, shows ? 10 : 0)
+            .background(shows ? PaperTheme.paper : .clear)
         }
     }
 

@@ -10,7 +10,7 @@ struct TabStrip: View {
     let selected: MainlineTab
     let select: (MainlineTab) -> Void
     let newCategory: () -> Void
-    /// 右端被同步记号浮盖的那一截：滚动内容多留这一段，
+    /// 右端被浮盖的那一截（档案盒、同步记号）：滚动内容多留这一段，
     /// 滚到头时最后一枚胶囊仍能整个走出记号底下。
     var trailingInset: CGFloat = 0
 
@@ -42,8 +42,6 @@ struct TabStrip: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                // 档案盒钉在最末：有归档的分类才露面。
-                ArchiveBox(selected: selected, select: select)
             }
             .padding(.horizontal, ScreenLayout.screenEdge)
             .padding(.trailing, trailingInset)

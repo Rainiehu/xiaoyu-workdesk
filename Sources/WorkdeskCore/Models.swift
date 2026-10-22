@@ -9,7 +9,7 @@ public struct Category: Identifiable, Codable, Equatable {
     /// 见 ADR-0007。
     public var deletedAt: Date?
     /// 归档时刻。有值就是归档态：连同名下的一切从主线上撤下，只在档案里看得见；
-    /// 待办一条不动，取回就原样回来。归档不是删除 —— 归档的分类是活的。见 ADR-0010。
+    /// 待办一条不动，取回就原样回来。归档不是删除 —— 归档的分类是活的。见 ADR-0011。
     public var archivedAt: Date?
 
     public init(

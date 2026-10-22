@@ -214,7 +214,7 @@ public final class Store {
     }
 
     /// 主线上的分类：活着、也没归档。tab 栏、记事选择器、「移到分类」的名单看的都是这一份 ——
-    /// 归档的分类连同名下的一切从主线上撤下，只在档案里露面，见 ADR-0010。
+    /// 归档的分类连同名下的一切从主线上撤下，只在档案里露面，见 ADR-0011。
     public var mainlineCategories: [Category] {
         categories.filter { !$0.isDeleted && !$0.isArchived }
     }

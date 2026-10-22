@@ -6,7 +6,7 @@ import WorkdeskUI
 /// 点一个就在内容区看它 —— 那时盒子是选中态，穿着正在看的那个分类的颜色。
 ///
 /// 收进去的那一下盒子跳一拍：tab 从栏上消失了，人得看得见它去了哪儿。
-/// 归档不开撤销窗口，这一跳就是全部的交代 —— 回头路就在这个盒子里。见 ADR-0010。
+/// 归档不开撤销窗口，这一跳就是全部的交代 —— 回头路就在这个盒子里。见 ADR-0011。
 struct ArchiveBox: View {
     @Environment(Store.self) private var store
     let selected: MainlineTab
