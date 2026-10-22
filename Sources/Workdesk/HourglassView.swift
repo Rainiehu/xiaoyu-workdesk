@@ -50,13 +50,21 @@ struct HourglassView: View {
         return HStack(alignment: .top, spacing: 0) {
             VStack(spacing: 0) {
                 // 输入区在 ScrollView 外面：轴滚到哪儿它都在顶上，记事随时都在手边。
-                if let category = store.recordingCategory {
-                    input(category: category, today: today)
-                        .padding(.horizontal, contentInset)
-                        .padding(.top, contentInset)
-                        .frame(maxWidth: contentWidth)
-                        .frame(maxWidth: .infinity)
+                Group {
+                    if let category = store.recordingCategory {
+                        input(category: category, today: today)
+                    } else {
+                        // 分类全进了档案：主线上无处可记。说清楚路在哪，别让输入框凭空消失。
+                        Text("主线上没有分类可记 · 新建一个，或从档案取回")
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+                .padding(.horizontal, contentInset)
+                .padding(.top, contentInset)
+                .frame(maxWidth: contentWidth)
+                .frame(maxWidth: .infinity)
                 timeline(today: today)
                     // 那只眼浮在轴滚动区的右上角：它管的就是这片内容，站在这片内容的角上。
                     // 输入区说「记到哪」、tab 栏说「去哪儿」，谁也不该收留一个「怎么看」的开关。
@@ -173,7 +181,8 @@ private struct RecordingCategoryPicker: View {
 
     var body: some View {
         Menu {
-            ForEach(store.livingCategories) { category in
+            // 归档的不列：记到档案里的事不上轴，从这儿记进去就是凭空消失。
+            ForEach(store.mainlineCategories) { category in
                 Button {
                     store.chooseRecordingCategory(category.id)
                 } label: {

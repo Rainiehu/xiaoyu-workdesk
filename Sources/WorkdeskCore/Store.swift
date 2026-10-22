@@ -213,6 +213,38 @@ public final class Store {
         categories.filter { !$0.isDeleted }
     }
 
+    /// 主线上的分类：活着、也没归档。tab 栏、记事选择器、「移到分类」的名单看的都是这一份 ——
+    /// 归档的分类连同名下的一切从主线上撤下，只在档案里露面，见 ADR-0010。
+    public var mainlineCategories: [Category] {
+        categories.filter { !$0.isDeleted && !$0.isArchived }
+    }
+
+    /// tab 栏上铺的那一排：主线上的分类，夹着还开着撤销窗口的删除态占位 —— 与 `categories`
+    /// 同一副，只是归档的不在里头（它的占位在档案名单里）。
+    public var tabCategories: [Category] {
+        categories.filter { !$0.isArchived }
+    }
+
+    /// 档案：归档了的分类，最近归档的在最上面 —— 刚收进去的那个一眼看得见。
+    /// 与 `categories` 一样夹着还开着撤销窗口的删除态记录：在档案里删掉的，占位就留在名单里
+    /// 它原来那一行（ADR-0007）。tab 栏末端的档案盒照着它空不空决定露不露面 ——
+    /// 占位还在名单里，盒子就还在，撤销的路才不会跟着盒子一起没了。
+    /// 同一刻归档的（同步一批落下来的）按 tab 栏上的先后排，免得两行每画一遍就换一次位置。
+    public var archivedCategories: [Category] {
+        categories.enumerated()
+            .filter { $0.element.isArchived }
+            .sorted {
+                let (a, b) = ($0.element.archivedAt ?? .distantPast, $1.element.archivedAt ?? .distantPast)
+                return a != b ? a > b : $0.offset < $1.offset
+            }
+            .map(\.element)
+    }
+
+    /// 归档分类的 id。轴、未排期列、徽标逐条问「这条在不在主线上」，一次备好免得每条都去扫数组。
+    private var archivedCategoryIDs: Set<Category.ID> {
+        Set(categories.lazy.filter(\.isArchived).map(\.id))
+    }
+
     /// 一个分类此刻在活人中排第几（数组里它前面有几个活人）。
     /// 云端的 `position` 字段说的就是这个数 —— 删除态的记录不占位置。
     private func livingPosition(before index: Int) -> Int {
@@ -267,8 +299,9 @@ public final class Store {
 
     /// 除了这一个之外活着的分类。待办的「移到分类」菜单列的就是它们 ——
     /// 一条待办没法移到它已经在的地方，也没法移进一个删除态的分类。
+    /// 归档的也不列：移进档案不是一次「移到分类」。从档案里往外移照样列得出主线上的那些。
     public func categories(besides categoryID: Category.ID) -> [Category] {
-        livingCategories.filter { $0.id != categoryID }
+        mainlineCategories.filter { $0.id != categoryID }
     }
 
     /// 删掉一个分类。**只删得掉空的** —— 里头还有活着的待办（无论完成与否，删除态的不算数）
@@ -305,6 +338,22 @@ public final class Store {
         return .deleted
     }
 
+    /// 归档：把一个分类连同名下的一切从主线上撤下，收进档案。里头有没做完的也收 ——
+    /// 跟着一起撤下，取回时原样回来。待办一条不动，记录也不丢，所以不拦、不确认，
+    /// 也不开撤销窗口：档案本身就是回头路。删除态的、已归档的、不存在的，都什么也不发生。
+    ///
+    /// 它在数组里的位置不动 —— tab 栏只是不画它，取回就回到原来那一格。
+    public func archiveCategory(_ id: Category.ID) {
+        guard let category = category(id), !category.isArchived else { return }
+        updateCategory(id) { $0.archivedAt = .now }
+    }
+
+    /// 取回：从档案回到主线上，回到 tab 栏原来的位置 —— 那个位置是使用者自己拖出来的。
+    public func retrieveCategory(_ id: Category.ID) {
+        guard let category = category(id), category.isArchived else { return }
+        updateCategory(id) { $0.archivedAt = nil }
+    }
+
     /// 改一个分类，落盘并记账。找不着就什么也不发生 —— 与 `update(_:_:)` 同一副脾气。
     private func updateCategory(_ id: Category.ID, _ change: (inout Category) -> Void) {
         guard let i = categories.firstIndex(where: { $0.id == id }) else { return }
@@ -319,13 +368,15 @@ public final class Store {
     /// 就落回第一个分类 —— 「记不起来」于是不是一个要视图层去应付的状态。
     /// 一个分类都没有时是 `nil`：那时无处可记，也就不该记出一条无归属的待办。
     public var recordingCategory: Category? {
-        chosenRecordingCategoryID.flatMap(category) ?? livingCategories.first
+        // 记着的那个归档了就先落回主线上的第一个；记性不抹，取回之后又认回它。
+        chosenRecordingCategoryID.flatMap(category).flatMap { $0.isArchived ? nil : $0 }
+            ?? mainlineCategories.first
     }
 
     /// 选一个分类来记事。这个选择跨重启保留，好让连续记同一类事情不必反复选。
     /// 指向不存在（含删除态）的分类时什么也不发生，与 `addTodo` 同一副脾气。
     public func chooseRecordingCategory(_ id: Category.ID) {
-        guard category(id) != nil else { return }
+        guard let category = category(id), !category.isArchived else { return }
         chosenRecordingCategoryID = id
         savePreferences()
     }
@@ -346,8 +397,12 @@ public final class Store {
     /// 侧边栏徽标要的数字。派生数据一律从这里出，视图层不自己聚合。
     /// 删除态的不算 —— 占位还站在原位，但那件事已经不在「要做」的名下了。
     /// 子待办也不算：徽标数的是**事**，一件带五步的事是一件事，不是六件。小标题更不是事。
+    /// 归档分类里的也不算：它们连同分类从主线上撤下了。
     public var unfinishedTodoCount: Int {
-        todos.filter { !$0.done && !$0.isDeleted && $0.parentID == nil && !$0.isHeading }.count
+        let archived = archivedCategoryIDs
+        return todos.filter {
+            !$0.done && !$0.isDeleted && $0.parentID == nil && !$0.isHeading && !archived.contains($0.categoryID)
+        }.count
     }
 
     /// 沙漏视图要的分组：所有分类中排了计划日的待办，按计划日铺成一条轴，日期升序。
@@ -364,7 +419,10 @@ public final class Store {
     ///   分组因此既可测，也不会有哪一处偷偷去问一次时钟。
     public func timeline(today: Date) -> [TimelineDay] {
         var byDay: [Date: [TodoItem]] = [today.dayStart: []]
+        let archived = archivedCategoryIDs
         for todo in todos {
+            // 归档分类的不上轴，做完的、没做完的都不上 —— 它们连同分类从主线上撤下了。
+            if archived.contains(todo.categoryID) { continue }
             // 轴上只有顶层：子待办是父的内部结构，没有自己的计划日，不单独占一行。
             // （正常路径上子待办的 plannedOn 恒为空，这里再挡一道是防同步合出来的怪状态。）
             // 小标题同理：它是分类视图左列的分界，与日子无关。
@@ -390,7 +448,8 @@ public final class Store {
     /// 一条也没有的分类不成组，右列因此是紧凑的。
     /// 组内的先后与分类视图左列一致（使用者自己拖出来的那个），两处看到的顺序永远是同一个。
     public var unscheduled: [UnscheduledGroup] {
-        categories.compactMap { category in
+        // 归档的分类不成组：它连同名下的一切从主线上撤下了。
+        categories.filter { !$0.isArchived }.compactMap { category in
             let mine = Self.ordered(todos(in: category.id).filter {
                 // 这一列同样只有顶层：步骤不是「还没安排的事」，它跟着父走。
                 // 小标题也不进来 —— 节只在分类视图左列里有意义，见 ADR-0009。

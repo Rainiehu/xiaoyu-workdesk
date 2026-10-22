@@ -19,6 +19,7 @@ struct MainlineView: View {
 
     /// 选中的那个分类。选中沙漏时是 `nil`；选中的分类没了（被删了）也是 `nil` ——
     /// 于是「找不着分类」和「落回沙漏」是同一件事，只在这儿判一次。
+    /// 归档的分类照样选得中：那就是从档案盒里点开它在看，见 `ArchiveBox`。
     private var selectedCategory: Category? {
         guard case .category(let id) = selection else { return nil }
         return store.category(id)
@@ -51,7 +52,13 @@ struct MainlineView: View {
     @ViewBuilder
     private var content: some View {
         if let selectedCategory {
-            CategoryTodoList(category: selectedCategory)
+            VStack(spacing: 0) {
+                // 同一副分类视图，顶上多一行说清它在档案里 —— 行上能做的事一件不少。
+                if selectedCategory.isArchived {
+                    ArchivedCategoryBanner(category: selectedCategory)
+                }
+                CategoryTodoList(category: selectedCategory)
+            }
         } else {
             HourglassView()
         }
@@ -119,15 +126,19 @@ struct MainlineTabBar: View {
                 HourglassTab(isSelected: selected == .hourglass) { select(.hourglass) }
                 // 一道细竖线把沙漏和分类分开：它是唯一不代表分类的一项，这里就说明白。
                 Divider().frame(height: 16)
-                ForEach(store.categories) { category in
+                ForEach(store.tabCategories) { category in
                     // 删除态的 tab 是原位占位胶囊：撤销窗口开着的那几秒它还占着位置，
                     // 别的 tab 不合拢，见 ADR-0007。
                     if category.isDeleted {
                         DeletedCategoryChip(category: category)
                     } else {
-                        CategoryTab(category: category, isSelected: selected == .category(category.id)) {
-                            select(.category(category.id))
-                        }
+                        CategoryTab(
+                            category: category, isSelected: selected == .category(category.id),
+                            select: { select(.category(category.id)) },
+                            // 正看着的那个收进档案就落回沙漏：tab 已经不在栏上了，
+                            // 内容区还停在它身上，人就找不着自己在哪儿。
+                            didArchive: { if selected == .category(category.id) { select(.hourglass) } }
+                        )
                     }
                 }
                 NewCategoryButton(onCreate: { select(.category($0.id)) }) {
@@ -138,6 +149,8 @@ struct MainlineTabBar: View {
                         .contentShape(Rectangle())
                 }
                 .help("新建分类")
+                // 档案盒钉在 tab 的最末：有归档的分类才露面，点开是档案名单。
+                ArchiveBox(selected: selected, select: select)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
@@ -176,6 +189,8 @@ private struct CategoryTab: View {
     let category: Category
     let isSelected: Bool
     let select: () -> Void
+    /// 刚把它收进了档案。主线据此决定要不要落回沙漏 —— 选中的是谁归主线管，这儿不碰。
+    let didArchive: () -> Void
     @State private var hovering = false
     /// 右键菜单点开的那个小面板 —— 改名和选色是同一个位置上的两件事，一次只开一个。
     @State private var panel: CategoryPanel?
@@ -254,6 +269,11 @@ private struct CategoryTab: View {
         // 一整盘颜色摊开来看比一串色名的菜单好挑，所以换色也走面板，不做二级菜单。
         Button("换颜色…") { panel = .recoloring }
         Divider()
+        // 归档在删除上面：想让一个告一段落的分类别再占着 tab 栏，多半要的是这一个。
+        Button("归档") {
+            withAnimation(.easeOut(duration: 0.2)) { store.archiveCategory(category.id) }
+            didArchive()
+        }
         Button("删除分类", role: .destructive) { delete() }
     }
 
@@ -274,7 +294,7 @@ private struct CategoryTab: View {
 /// 原位占位胶囊：刚删掉的分类在 tab 栏原来的位置上留下的口子，撤销窗口开着的
 /// 那几秒里点一下就回来 —— 与待办行的 `DeletedTodoRow` 同一副分寸，见 ADR-0007。
 /// 整个胶囊就是撤销按钮：占位上没有第二件可做的事，不必让人瞄准那枚小图标。
-private struct DeletedCategoryChip: View {
+struct DeletedCategoryChip: View {
     @Environment(Store.self) private var store
     let category: Category
 
@@ -425,7 +445,7 @@ private struct CategoryNamePanel: View {
 extension View {
     /// tab 的胶囊底：选中最重，悬停轻一点，静止什么也不画。
     /// 沙漏 tab 与分类 tab 共用它，两种 tab 因此只在「有没有字」上不一样。
-    fileprivate func tabChip(_ tint: Color, isSelected: Bool, hovering: Bool) -> some View {
+    func tabChip(_ tint: Color, isSelected: Bool, hovering: Bool) -> some View {
         background(Capsule().fill(fill(tint, isSelected: isSelected, hovering: hovering)))
             .overlay(Capsule().stroke(isSelected ? tint.chipStroke : .clear, lineWidth: 1))
             .contentShape(Capsule())

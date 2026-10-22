@@ -6,13 +6,17 @@ public enum CategoryDeletionRefusal {
         todoCount > 0 ? "「\(categoryName)」里还有待办" : "「\(categoryName)」里还有小标题"
     }
 
-    public static func message(todoCount: Int, headingCount: Int) -> String {
+    /// 末尾补一句归档：多半人想删的是一个告一段落的分类，要的只是它别再占着 tab 栏 ——
+    /// 那条路不必先清空，见 ADR-0010。已经归档了的就不再提。
+    public static func message(todoCount: Int, headingCount: Int, isArchived: Bool = false) -> String {
+        let clearing: String
         if headingCount == 0 {
-            return "先把这 \(todoCount) 条待办移到别的分类，或者删掉，再来删这个分类。"
+            clearing = "先把这 \(todoCount) 条待办移到别的分类，或者删掉，再来删这个分类。"
+        } else if todoCount == 0 {
+            clearing = "先把这 \(headingCount) 个小标题删掉，再来删这个分类。"
+        } else {
+            clearing = "先把这 \(todoCount) 条待办移到别的分类或者删掉，再删掉这 \(headingCount) 个小标题，然后再来删这个分类。"
         }
-        if todoCount == 0 {
-            return "先把这 \(headingCount) 个小标题删掉，再来删这个分类。"
-        }
-        return "先把这 \(todoCount) 条待办移到别的分类或者删掉，再删掉这 \(headingCount) 个小标题，然后再来删这个分类。"
+        return isArchived ? clearing : clearing + "只是不想让它占着 tab 栏，可以归档。"
     }
 }

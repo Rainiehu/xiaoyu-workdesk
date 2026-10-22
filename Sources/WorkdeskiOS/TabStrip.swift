@@ -20,15 +20,18 @@ struct TabStrip: View {
                 hourglassTab
                 // 一道细竖线把沙漏和分类分开：它是唯一不代表分类的一项，这里就说明白。
                 Divider().frame(height: 16)
-                ForEach(store.categories) { category in
+                ForEach(store.tabCategories) { category in
                     // 删除态的 tab 是原位占位胶囊：撤销窗口开着的那几秒它还占着位置，
                     // 别的 tab 不合拢，见 ADR-0007。
                     if category.isDeleted {
                         DeletedCategoryChip(category: category)
                     } else {
-                        CategoryTabChip(category: category, isSelected: selected == .category(category.id)) {
-                            select(.category(category.id))
-                        }
+                        CategoryTabChip(
+                            category: category, isSelected: selected == .category(category.id),
+                            select: { select(.category(category.id)) },
+                            // 正看着的那个收进档案就落回沙漏 —— 与 Mac 同一条理由。
+                            didArchive: { if selected == .category(category.id) { select(.hourglass) } }
+                        )
                     }
                 }
                 Button(action: newCategory) {
@@ -39,6 +42,8 @@ struct TabStrip: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // 档案盒钉在最末：有归档的分类才露面 —— 与 Mac 同一个位置。
+                ArchiveBox(selected: selected, select: select)
             }
             .padding(.horizontal, ScreenLayout.screenEdge)
             .padding(.trailing, trailingInset)
@@ -69,6 +74,8 @@ struct CategoryTabChip: View {
     let category: Category
     let isSelected: Bool
     let select: () -> Void
+    /// 刚把它收进了档案。选中的是谁归主线管，这儿只报一声。
+    let didArchive: () -> Void
 
     /// 改名面板开着。与新建同一副：一个带输入框的 alert。
     @State private var renaming = false
@@ -117,6 +124,10 @@ struct CategoryTabChip: View {
             }
             Button("换颜色…") { recoloring = true }
             Divider()
+            Button("归档") {
+                withAnimation(.easeOut(duration: 0.2)) { store.archiveCategory(category.id) }
+                didArchive()
+            }
             Button("删除分类", role: .destructive) { delete() }
         }
         .alert("重命名分类", isPresented: $renaming) {
@@ -157,7 +168,7 @@ struct CategoryTabChip: View {
 /// 原位占位胶囊：刚删掉的分类在 tab 条原来的位置上留下的口子，撤销窗口开着的
 /// 那几秒里点一下就回来 —— 与 Mac 的同名占位同一副，见 ADR-0007。
 /// 整个胶囊就是撤销按钮：占位上没有第二件可做的事。
-private struct DeletedCategoryChip: View {
+struct DeletedCategoryChip: View {
     @Environment(Store.self) private var store
     let category: Category
 

@@ -24,6 +24,7 @@ struct MainlineScreen: View {
 
     /// 选中的那个分类。选中沙漏时是 `nil`；选中的分类没了（被删了）也是 `nil` ——
     /// 「找不着分类」和「落回沙漏」是同一件事，只在这儿判一次。
+    /// 归档的分类照样选得中：那就是从档案盒里点开它在看。
     private var selectedCategory: Category? {
         guard case .category(let id) = selection else { return nil }
         return store.category(id)
@@ -88,8 +89,14 @@ struct MainlineScreen: View {
     @ViewBuilder
     private var content: some View {
         if let selectedCategory {
-            CategoryScreen(category: selectedCategory)
-                .id(selectedCategory.id)
+            VStack(spacing: 0) {
+                // 从档案盒里点开的：同一副分类屏，顶上多一行说清它在档案里。
+                if selectedCategory.isArchived {
+                    ArchivedCategoryBanner(category: selectedCategory)
+                }
+                CategoryScreen(category: selectedCategory)
+                    .id(selectedCategory.id)
+            }
         } else {
             HourglassScreen()
         }

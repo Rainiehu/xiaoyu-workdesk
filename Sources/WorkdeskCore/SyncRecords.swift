@@ -134,6 +134,8 @@ extension Category {
         record["color"] = color.rawValue
         record["position"] = position
         record["deletedAt"] = deletedAt
+        // 取回靠赋 `nil` 把云端的旧记号抹掉，所以每次都写，与删除记号同一副。
+        record["archivedAt"] = archivedAt
         return record
     }
 
@@ -145,7 +147,10 @@ extension Category {
               let id = UUID(uuidString: record.recordID.recordName),
               let name = record["name"] as? String else { return nil }
         let color = (record["color"] as? String).flatMap(CategoryColor.init(rawValue:)) ?? .slate
-        self.init(id: id, name: name, color: color, deletedAt: record["deletedAt"] as? Date)
+        self.init(
+            id: id, name: name, color: color,
+            deletedAt: record["deletedAt"] as? Date, archivedAt: record["archivedAt"] as? Date
+        )
     }
 
     /// 记录里写的位置。没写就排到最后 —— 一个来历不明的位置不值得插队。

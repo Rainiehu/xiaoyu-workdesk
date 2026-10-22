@@ -25,8 +25,8 @@ enum SyncMerge {
         return merged
     }
 
-    /// 合并一个分类（带位置）。方面：名字、颜色、位置、删除记号 ——
-    /// 改名、换色、挪动、删除各是一次操作。
+    /// 合并一个分类（带位置）。方面：名字、颜色、位置、删除记号、归档记号 ——
+    /// 改名、换色、挪动、删除、归档（取回）各是一次操作。
     static func category(
         shadow: PlacedCategory?, local: PlacedCategory, remote: PlacedCategory, localIsLater: Bool
     ) -> PlacedCategory {
@@ -35,6 +35,7 @@ enum SyncMerge {
         replay(\.category.color, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         replay(\.position, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         replay(\.category.deletedAt, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
+        replay(\.category.archivedAt, shadow: shadow, local: local, localIsLater: localIsLater, into: &merged)
         return merged
     }
 

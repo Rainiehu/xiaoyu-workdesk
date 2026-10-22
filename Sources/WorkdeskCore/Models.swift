@@ -8,15 +8,22 @@ public struct Category: Identifiable, Codable, Equatable {
     /// 删除时刻。删除是打记号，不是抹掉：有值就是删除态，从一切界面消失，记录永远留着。
     /// 见 ADR-0007。
     public var deletedAt: Date?
+    /// 归档时刻。有值就是归档态：连同名下的一切从主线上撤下，只在档案里看得见；
+    /// 待办一条不动，取回就原样回来。归档不是删除 —— 归档的分类是活的。见 ADR-0010。
+    public var archivedAt: Date?
 
-    public init(id: UUID = UUID(), name: String, color: CategoryColor, deletedAt: Date? = nil) {
+    public init(
+        id: UUID = UUID(), name: String, color: CategoryColor, deletedAt: Date? = nil, archivedAt: Date? = nil
+    ) {
         self.id = id
         self.name = name
         self.color = color
         self.deletedAt = deletedAt
+        self.archivedAt = archivedAt
     }
 
     public var isDeleted: Bool { deletedAt != nil }
+    public var isArchived: Bool { archivedAt != nil }
 }
 
 /// 分类可用的颜色。只存色名不存色值 —— 具体色值由视图层决定，

@@ -34,6 +34,13 @@ struct HourglassScreen: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if let category = store.recordingCategory {
                     input(category: category, today: today)
+                } else {
+                    // 分类全进了档案：主线上无处可记。说清楚路在哪，别让输入栏凭空消失。
+                    Text("主线上没有分类可记 · 新建一个，或从档案取回")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
                 }
             }
             // 未排期是沙漏屏的副列，从右缘拉出 —— 轴答「排在哪天」，它答「还有什么没安排」。
