@@ -247,4 +247,62 @@ struct UsageTests {
         #expect(0.4.percentString == "<1%")
         #expect(0.0.percentString == "0%")
     }
+
+    // MARK: - 钥匙串里那份凭证
+
+    /// 钥匙串条目的真实形状（token 换成了假的）：Claude 自己那支在 `claudeAiOauth`，
+    /// 旁边还并排躺着一堆 MCP 服务器各自的凭证，每个也叫 accessToken。
+    static func credentialBlob(claude: String, mcp: String) -> Data {
+        """
+        {"mcpOAuth":{"plugin:engineering:github|1eea5f27":{"serverName":"GitHub",
+         "accessToken":"\(mcp)","clientId":"abc"}},
+         "claudeAiOauth":{"accessToken":"\(claude)","refreshToken":"r",
+         "expiresAt":1,"scopes":["user:inference"],"subscriptionType":"max"},
+         "organizationUuid":"6f1d"}
+        """.data(using: .utf8)!
+    }
+
+    @Test("取的是 claudeAiOauth 那一个，不会错拿 MCP 服务器的 token")
+    func prefersTheClaudeBranch() {
+        // 两边都非空时才看得出偏好。不分先后的话取到的是字典序碰巧排前的那个 ——
+        // 发出去换回 401，卡片却会指着一份没过期的凭证喊「已过期」。
+        let blob = Self.credentialBlob(claude: "claude-token", mcp: "github-token")
+        #expect(ClaudeUsageAPI.credential(in: blob) == .token("claude-token"))
+    }
+
+    @Test("Claude 那支空着、MCP 的有值：那也不算登录，不能拿别人的凑数")
+    func doesNotBorrowAnotherServersToken() {
+        let blob = Self.credentialBlob(claude: "", mcp: "github-token")
+        #expect(ClaudeUsageAPI.credential(in: blob) == .loggedOut)
+    }
+
+    @Test("条目在、token 全是空串 —— 那是没登录，不是读不到")
+    func emptyTokensMeanLoggedOut() {
+        let blob = Self.credentialBlob(claude: "", mcp: "")
+        let credential = ClaudeUsageAPI.credential(in: blob)
+        #expect(credential == .loggedOut)
+        #expect(credential.problem == "未登录 · 在终端登录一次")
+    }
+
+    @Test("形状完全不认得时，说的是另一句话")
+    func unknownShapesSaySo() {
+        for bad in ["", "not json at all", "{}", #"{"organizationUuid":"6f1d"}"#] {
+            #expect(ClaudeUsageAPI.credential(in: bad.data(using: .utf8)!) == .unreadable)
+        }
+    }
+
+    @Test("根上多出别的 claude 名字的键，也照样取到 claudeAiOauth 那个")
+    func extraClaudeKeysDoNotShadowTheToken() {
+        // 几支的先后不能随字典散列走：跑多遍，每遍都得是同一个答案。
+        let json = #"{"claudeCodeSettings":{"theme":"dark"},"claudeAiOauth":{"accessToken":"real"},"claudeZ":{"accessToken":""}}"#
+        for _ in 0..<20 {
+            #expect(ClaudeUsageAPI.credential(in: json.data(using: .utf8)!) == .token("real"))
+        }
+    }
+
+    @Test("token 藏在数组里也找得到 —— 形状不归我们管")
+    func findsTokensNestedInArrays() {
+        let json = #"{"claudeAiOauth":{"accounts":[{"accessToken":"deep-token"}]}}"#
+        #expect(ClaudeUsageAPI.credential(in: json.data(using: .utf8)!) == .token("deep-token"))
+    }
 }

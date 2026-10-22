@@ -20,7 +20,7 @@ enum CodexUsageAPI {
 
     static func fetch() async -> Result {
         guard let auth = credentials() else {
-            return Result(problem: "读不到 Codex 的登录凭证")
+            return Result(problem: "读不到登录凭证")
         }
         var request = URLRequest(url: endpoint)
         request.timeoutInterval = 10
