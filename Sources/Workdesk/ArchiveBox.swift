@@ -2,7 +2,7 @@ import SwiftUI
 import WorkdeskCore
 import WorkdeskUI
 
-/// tab 栏末端的档案盒：归档的分类待着的地方，有归档的才露面。点开是档案名单，
+/// tab 栏最右端的档案盒（标语的右边）：归档的分类待着的地方，有归档的才露面。点开是档案名单，
 /// 点一个就在内容区看它 —— 那时盒子是选中态，穿着正在看的那个分类的颜色。
 ///
 /// 收进去的那一下盒子跳一拍：tab 从栏上消失了，人得看得见它去了哪儿。
@@ -28,7 +28,16 @@ struct ArchiveBox: View {
         // 盒子常驻在视图树里、空了才不画：名单浮层挂在它身上，在名单里取回最后一个时
         // 挂点若跟着没了，浮层就是被硬拆掉的。浮层开着时盒子留着，空了就收浮层。
         ZStack {
-            if !store.archivedCategories.isEmpty || presented { box }
+            if !store.archivedCategories.isEmpty || presented {
+                // 与沙漏右边那道细竖线同一副，左右照着摆：沙漏是最左的「不是分类」，
+                // 档案盒是最右的「不是分类」。线跟着盒子走 —— 盒子不在，线也不在。
+                HStack(spacing: 6) {
+                    Divider().frame(height: 16)
+                    box
+                }
+                // 标语是光字、没有胶囊内衬，多让一截，线两侧看着才与沙漏那边一样宽。
+                .padding(.leading, 14)
+            }
         }
         .onChange(of: store.archivedCategories.count) { old, new in
             if new > old { arrivals += 1 }

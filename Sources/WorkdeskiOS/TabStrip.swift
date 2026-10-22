@@ -42,7 +42,7 @@ struct TabStrip: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                // 档案盒钉在最末：有归档的分类才露面 —— 与 Mac 同一个位置。
+                // 档案盒钉在最末：有归档的分类才露面。
                 ArchiveBox(selected: selected, select: select)
             }
             .padding(.horizontal, ScreenLayout.screenEdge)

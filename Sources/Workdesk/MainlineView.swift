@@ -102,7 +102,11 @@ struct MainlineTabBar: View {
         HStack(spacing: 0) {
             tabs
             motto
+            // 档案盒钉在最右端、标语的右边，与标语一样不随 tab 滚动：它不是一个分类，
+            // 不该排进那一排里。有归档的分类才露面。
+            ArchiveBox(selected: selected, select: select)
         }
+        .padding(.trailing, 20)
     }
 
     /// 钉在 tab 栏右端的一句话。放在可滚动区外面 —— 分类再多、横着滚起来，它也留在原处。
@@ -116,7 +120,6 @@ struct MainlineTabBar: View {
             .tracking(2)
             // 不许被压缩：窗口窄了该让 tab 那边先滚，而不是把这句话挤成省略号。
             .fixedSize()
-            .padding(.trailing, 20)
             .accessibilityHidden(true)
     }
 
@@ -149,8 +152,6 @@ struct MainlineTabBar: View {
                         .contentShape(Rectangle())
                 }
                 .help("新建分类")
-                // 档案盒钉在 tab 的最末：有归档的分类才露面，点开是档案名单。
-                ArchiveBox(selected: selected, select: select)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)

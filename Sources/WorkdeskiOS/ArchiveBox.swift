@@ -3,7 +3,7 @@ import SwiftUI
 import WorkdeskCore
 import WorkdeskUI
 
-/// tab 条末端的档案盒：与 Mac 同一个位置、同一副规矩 —— 有归档的分类才露面，点开是档案名单，
+/// tab 条末端的档案盒：与 Mac 同一副规矩 —— 有归档的分类才露面，点开是档案名单，
 /// 点一个就在内容区看它，那时盒子是选中态、穿着那个分类的颜色。见 ADR-0010。
 struct ArchiveBox: View {
     @Environment(Store.self) private var store
