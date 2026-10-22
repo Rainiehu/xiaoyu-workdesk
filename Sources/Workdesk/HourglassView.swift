@@ -336,7 +336,7 @@ private struct TimelineRow: View {
             }
         }
         .todoRowChrome(hovering: hovering)
-        .onHover { hovering = $0 }
+        .rowHover($hovering)
         // 整行都拖得动，包括已完成的那些 —— 做完的事也照样可以改它排在哪天。
         // 内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         .contentShape(Rectangle())

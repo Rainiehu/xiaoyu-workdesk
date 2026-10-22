@@ -240,7 +240,7 @@ private struct TodoRow: View {
             }
         }
         .todoRowChrome(hovering: hovering)
-        .onHover { hovering = $0 }
+        .rowHover($hovering)
         // 整行都抓得动，内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         // 已完成的也抓得动 —— 它排不了序，但照样可以拖到 tab 栏上换分类。
         .contentShape(Rectangle())
@@ -292,7 +292,7 @@ private struct HeadingRow: View {
             }
         }
         .padding(.vertical, 4)
-        .onHover { hovering = $0 }
+        .rowHover($hovering)
         .contentShape(Rectangle())
         .contextMenu {
             Button("改写") { editing.begin(heading) }

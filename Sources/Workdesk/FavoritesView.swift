@@ -156,7 +156,7 @@ struct FavoriteCard: View {
                 .fill(Color(nsColor: .controlBackgroundColor))
                 .shadow(color: .black.opacity(hovering ? 0.08 : 0.04), radius: hovering ? 6 : 3, y: 1)
         )
-        .onHover { hovering = $0 }
+        .rowHover($hovering)
         .onTapGesture {
             if let url = item.url { openURL(url) }
         }

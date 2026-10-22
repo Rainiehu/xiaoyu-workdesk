@@ -137,7 +137,7 @@ private struct UnscheduledRow: View {
             }
         }
         .todoRowChrome(hovering: hovering)
-        .onHover { hovering = $0 }
+        .rowHover($hovering)
         // 内缩一并算进拖拽范围里，免得只有正文那几个字抓得住。
         .contentShape(Rectangle())
         .todoRowEditing(todo, editing: $editing)

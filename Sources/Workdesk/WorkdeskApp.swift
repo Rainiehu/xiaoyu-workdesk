@@ -13,6 +13,8 @@ struct WorkdeskApp: App {
     @State private var composer = TreeComposer()
     /// 全屏唯一那一枚行落点指示。集中一份才灭得干净，见 `TodoDropIndicator`。
     @State private var dropIndicator = TodoDropIndicator()
+    /// 窗口里有没有东西正在滚。滚着的时候行上的悬停一概不亮，见 `ScrollActivity`。
+    @State private var scroll = ScrollActivity()
 
     init() {
         // 存储目录可以用环境变量指到别处 —— 同一台 Mac 跑两个实例（不同目录、
@@ -32,6 +34,7 @@ struct WorkdeskApp: App {
                 .environment(sync)
                 .environment(composer)
                 .environment(dropIndicator)
+                .environment(scroll)
                 .frame(minWidth: 860, minHeight: 560)
                 // 同步在这儿点火。没带 iCloud 权限的构建里它什么也不做 —— app 照旧是单机 app。
                 .task { sync.start() }

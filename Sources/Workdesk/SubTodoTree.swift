@@ -82,7 +82,7 @@ private struct SubTodoRow: View {
             }
         }
         .todoRowChrome(hovering: hovering)
-        .onHover { hovering = $0 }
+        .rowHover($hovering)
         .contentShape(Rectangle())
         .todoRowEditing(todo, editing: $editing)
         .draggable(DraggedTodo(id: todo.id)) { TodoDragPreview(text: todo.text, tint: tint) }
