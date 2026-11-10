@@ -13,17 +13,14 @@ import WorkdeskCore
 struct UnscheduledColumn: View {
     @Environment(Store.self) private var store
 
-    /// 这一列的宽度。定死一个值而不是按比例分 —— 轴于是随窗口一起长，
-    /// 「哪边是主角」不随窗口宽度动摇。分类视图右列引用的就是这一个数：
-    /// 两处的右列看着是同一块东西。
-    static let width: CGFloat = 264
+    /// 这一列的宽度由沙漏视图给（拖中间那道线定，见 `SideColumnWidth`），这里只管把内容铺满它。
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             groups
         }
-        .frame(width: Self.width, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// 一句话说明这一列是什么。轻到几乎不占分量 —— 它不是标题栏，是个标签。

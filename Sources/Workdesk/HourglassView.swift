@@ -23,6 +23,10 @@ struct HourglassView: View {
     @Environment(TodayClock.self) private var clock
 
     @State private var draft = ""
+
+    /// 右边「未排期」列的宽度，与分类视图的右列共用一个数，见 `SideColumnWidth`。
+    @AppStorage(SideColumnWidth.key) private var unscheduledColumnWidth = SideColumnWidth.defaultValue
+    @State private var totalWidth: CGFloat = 0
     @FocusState private var inputFocused: Bool
 
     /// 今天那一组在轴内容里的纵向中点，和轴内容的总高，都是从布局里量出来的：
@@ -76,10 +80,12 @@ struct HourglassView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // 未排期的事单开一列，与轴分开滚：一边是「排在哪天」，一边是「还没安排」。
-            Divider()
+            SideColumnDivider(total: totalWidth)
             UnscheduledColumn()
+                .frame(width: SideColumnWidth.clamped(unscheduledColumnWidth, total: totalWidth))
                 .frame(maxHeight: .infinity)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { totalWidth = $0 }
     }
 
     /// 只有排了期的日子在轴上，条数不多，所以用 VStack 而不是 LazyVStack ——

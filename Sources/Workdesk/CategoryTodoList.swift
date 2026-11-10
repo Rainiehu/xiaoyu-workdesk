@@ -17,10 +17,11 @@ struct CategoryTodoList: View {
     @State private var draft = ""
     @FocusState private var inputFocused: Bool
 
-    /// 右列的宽度。定死一个值而不是按比例分 —— 左列于是随窗口一起长，
-    /// 「哪边是主角」不随窗口宽度动摇。引用同一个常量而不是各写一遍 264：
-    /// 两处的右列看着是同一块东西，就该真是同一个数。
-    private let finishedColumnWidth = UnscheduledColumn.width
+    /// 右列的宽度。是个绝对值而不是比例 —— 左列于是随窗口一起长，
+    /// 「哪边是主角」不随窗口宽度动摇。宽度由中间那道线拖出来，与沙漏视图的右列共用一个数，
+    /// 见 `SideColumnWidth`。
+    @AppStorage(SideColumnWidth.key) private var finishedColumnWidth = SideColumnWidth.defaultValue
+    @State private var totalWidth: CGFloat = 0
 
     /// 左列的内容宽度上限。窗口再宽，一行字也不跟着摊开。
     private let unfinishedColumnMaxWidth: CGFloat = 620
@@ -45,11 +46,12 @@ struct CategoryTodoList: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             // 一件事都没有的时候不分列：那时没有「已完成」可谈，整个界面就是一段引导。
             if !columns.isEmpty {
-                Divider()
+                SideColumnDivider(total: totalWidth)
                 finishedColumn(columns.finished)
-                    .frame(width: finishedColumnWidth)
+                    .frame(width: SideColumnWidth.clamped(finishedColumnWidth, total: totalWidth))
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { totalWidth = $0 }
     }
 
     /// 左列：记事的入口留在顶上，下面是还没完成的事。
