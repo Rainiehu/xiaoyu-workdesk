@@ -645,10 +645,12 @@ public final class Store {
     /// 只有顶层能换分类 —— 子待办的分类跟着根走，子行上本没有「移到分类」这回事。
     /// 换的是整棵树：名下的子待办（不论几层）一并跟过去，树永远在同一个分类里。
     /// 小标题也换不了：节只在自己那个分类的顺序里才有意义，搬过去就只剩一句孤零零的字。
+    /// 档案盒里的分类收不进新东西：归档是整块撤下，往里塞一条等于绕开主线偷偷改它，
+    /// 所以落点必须在主线上 —— 这条规矩在这里守，不靠界面恰好没列出它。
     /// - Returns: 这一移是否落到了实处。视图层照着它告诉系统这次拖拽接住了没有。
     @discardableResult
     public func moveTodo(_ id: TodoItem.ID, to categoryID: Category.ID) -> Bool {
-        guard category(categoryID) != nil,
+        guard let target = category(categoryID), !target.isArchived,
               let item = todos.first(where: { $0.id == id }), !item.isHeading,
               item.parentID == nil, item.categoryID != categoryID else { return false }
         let top = topOrder(in: categoryID)

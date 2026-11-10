@@ -83,6 +83,21 @@ struct ArchiveTests {
         }
     }
 
+    @Test("档案盒里的分类不接移进来的待办")
+    func archivedCategoryRefusesMoveIn() throws {
+        try withTemporaryDirectory { dir in
+            let store = Store(directory: dir)
+            let work = try #require(store.addCategory("工作"))
+            let trip = try #require(store.addCategory("旅行"))
+            store.addTodo("写周报", in: work.id)
+            let todo = try #require(store.todos.first)
+            store.archiveCategory(trip.id)
+
+            #expect(store.moveTodo(todo.id, to: trip.id) == false)
+            #expect(store.todos.first?.categoryID == work.id)
+        }
+    }
+
     @Test("归档分类的待办不上轴：做完的、没做完的都不上")
     func archivedTodosLeaveTheTimeline() throws {
         try withTemporaryDirectory { dir in
