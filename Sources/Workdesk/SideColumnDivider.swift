@@ -16,7 +16,9 @@ enum SideColumnWidth {
 
     /// 窗口给这一排的总宽是 `total` 时，右列实际能取到的宽度。
     /// 存下来的值不跟着窗口变：窗口缩窄时右列临时让步，窗口拉回来它就回到原样。
+    /// 总宽还没量出来（第一帧）时只按上下限夹，不然右列会先缩到最窄、下一帧再弹开。
     static func clamped(_ width: Double, total: CGFloat) -> CGFloat {
+        guard total > 0 else { return min(max(CGFloat(width), range.lowerBound), range.upperBound) }
         let upper = max(range.lowerBound, min(range.upperBound, total - mainMinWidth))
         return min(max(CGFloat(width), range.lowerBound), upper)
     }

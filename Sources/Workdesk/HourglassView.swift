@@ -24,10 +24,11 @@ struct HourglassView: View {
 
     @State private var draft = ""
 
+    @FocusState private var inputFocused: Bool
+
     /// 右边「未排期」列的宽度，与分类视图的右列共用一个数，见 `SideColumnWidth`。
     @AppStorage(SideColumnWidth.key) private var unscheduledColumnWidth = SideColumnWidth.defaultValue
     @State private var totalWidth: CGFloat = 0
-    @FocusState private var inputFocused: Bool
 
     /// 今天那一组在轴内容里的纵向中点，和轴内容的总高，都是从布局里量出来的：
     /// 「按需垫高」要拿它们算出两头各差多少才够把今天顶到中线（见 `endInsets`）。
