@@ -23,7 +23,7 @@ enum SideColumnWidth {
 }
 
 /// 左右两列之间那道竖线，抓住可以左右拖，改的是右列的宽度。
-/// 线还是那根 1pt 的细线；能抓住的是它两侧各几个点的一条窄带，鼠标进去变成左右箭头 ——
+/// 线还是那根 1pt 的细线；能抓住的是以它为中线的一条窄带，鼠标进去变成左右箭头 ——
 /// 平时看不出它能拖，手一碰到就知道。双击回到默认宽度。
 struct SideColumnDivider: View {
     @AppStorage(SideColumnWidth.key) private var width = SideColumnWidth.defaultValue
@@ -39,36 +39,41 @@ struct SideColumnDivider: View {
     private let grabWidth: CGFloat = 9
 
     var body: some View {
-        Divider()
-            .overlay {
-                Color.clear
-                    .frame(width: grabWidth)
-                    .contentShape(Rectangle())
-                    // 推与弹必须成对：鼠标停在线上时换了视图，也要把箭头弹掉，否则它会一直留在别处。
-                    .onHover { inside in
-                        guard inside != hovering else { return }
-                        hovering = inside
-                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-                    }
-                    .onDisappear {
-                        if hovering { NSCursor.pop(); hovering = false }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { value in
-                                // 从屏上实际的宽度起拖：窗口窄时右列正在让步，存的值比看到的宽。
-                                let start = widthAtDragStart ?? SideColumnWidth.clamped(width, total: total)
-                                widthAtDragStart = start
-                                // 线往左拖，右列变宽。
-                                width = Double(SideColumnWidth.clamped(Double(start - value.translation.width), total: total))
-                            }
-                            .onEnded { _ in widthAtDragStart = nil }
-                    )
-                    .onTapGesture(count: 2) {
-                        width = SideColumnWidth.defaultValue
-                    }
-            }
-            // 抓手带子伸出线外几个点，压在右列上面；不抬高一层，右半边会被后画的右列接走。
-            .zIndex(1)
+        // 抓手占真实的版面宽度，线画在正中。不能让它从 1pt 的线上伸出去盖在两边：
+        // 两列都是 ScrollView，macOS 上底下是 NSScrollView，伸进它们地盘的那几个点
+        // 鼠标事件先被 AppKit 交给了滚动视图，SwiftUI 的手势收不到，线就拖不动。
+        // 线自己画：Divider 放进 ZStack 就不知道该竖着了。
+        ZStack {
+            Color.clear
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(width: 1)
+        }
+        .frame(width: grabWidth)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        // 推与弹必须成对：鼠标停在线上时换了视图，也要把箭头弹掉，否则它会一直留在别处。
+        .onHover { inside in
+            guard inside != hovering else { return }
+            hovering = inside
+            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+        .onDisappear {
+            if hovering { NSCursor.pop(); hovering = false }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    // 从屏上实际的宽度起拖：窗口窄时右列正在让步，存的值比看到的宽。
+                    let start = widthAtDragStart ?? SideColumnWidth.clamped(width, total: total)
+                    widthAtDragStart = start
+                    // 线往左拖，右列变宽。
+                    width = Double(SideColumnWidth.clamped(Double(start - value.translation.width), total: total))
+                }
+                .onEnded { _ in widthAtDragStart = nil }
+        )
+        .onTapGesture(count: 2) {
+            width = SideColumnWidth.defaultValue
+        }
     }
 }
